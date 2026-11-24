@@ -192,6 +192,13 @@ def main():
         if not relevant & selected:
             continue
         for spec in config.get(kind, []):
+            defaults = ("ducc-python", "ducc-cpp") if kind == "ducc" else (kind,)
+            candidates = set(spec.get("candidates", defaults))
+            if not candidates or candidates - relevant:
+                p.error(f"invalid candidates for {kind}: {sorted(candidates)}")
+            enabled = candidates & selected
+            if not enabled:
+                continue
             name = spec["name"]
             if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
                 raise ValueError("source name must contain only letters, numbers, _ or -")
@@ -210,7 +217,7 @@ def main():
                 attempt(name, admiral)
                 continue
             targets = (1, 3, 4) if kind == "ducc" else (2, 3, 4)
-            py_selected = "ducc-python" in selected if kind == "ducc" else "numpy" in selected
+            py_selected = "ducc-python" in enabled if kind == "ducc" else "numpy" in enabled
             dispatch_build = spec.get("dispatch", False)
             dispatch_py = None
             dispatch_wheel = None
@@ -253,7 +260,7 @@ def main():
                         attempt(prefix, python_profile)
                 if kind == "ducc":
                     for candidate, standard in DUCC_CPP_STANDARDS.items():
-                        if candidate not in selected:
+                        if candidate not in enabled:
                             continue
                         suffix = "cpp" if standard == 17 else f"cpp{standard}"
                         label = name + f"-{suffix}-v{level}"

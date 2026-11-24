@@ -18,7 +18,7 @@ python summarize.py results/fast
 
 Use `--check-only` to skip timings. Use separate output directories for independent runs.
 
-Edit `sources.json` or pass `--config path/to/sources.json` to choose repositories, branches, tags or commit hashes. Add multiple entries under `ducc` or `numpy` to compare forks. An entry can set `"dispatch": true` to request a multiarch DUCC or dispatch-enabled NumPy build. The default builds use fixed ISA levels. Unsupported host ISA levels are skipped.
+Edit `sources.json` or pass `--config path/to/sources.json` to choose repositories, branches, tags or commit hashes. Add multiple entries under `ducc` or `numpy` to compare forks. DUCC entries default to `ducc-python` and `ducc-cpp` (C++17); set `"candidates": ["ducc-cpp23"]` to select the C++23 build. The default C++23 entry tracks [`phiadaarr/ducc:cpp23_fft`](https://github.com/phiadaarr/ducc/tree/cpp23_fft); each run records the resolved commit SHA. An entry can set `"dispatch": true` to request a multiarch DUCC or dispatch-enabled NumPy build. The default builds use fixed ISA levels. Unsupported host ISA levels are skipped.
 
 ## GitHub Actions
 

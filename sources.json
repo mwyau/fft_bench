@@ -6,6 +6,14 @@
       "name": "ducc",
       "repo": "https://github.com/mreineck/ducc.git",
       "ref": "bf4f0e2f2f91dba6e270b8302904dbb6a42d6af3"
+    },
+    {
+      "name": "phiadaarr",
+      "repo": "https://github.com/phiadaarr/ducc.git",
+      "ref": "cpp23_fft",
+      "candidates": [
+        "ducc-cpp23"
+      ]
     }
   ],
   "numpy": [
