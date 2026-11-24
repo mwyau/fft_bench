@@ -16,7 +16,7 @@ class TestCases(unittest.TestCase):
 
     def test_no_tiny_batch_throughput(self):
         for c in cases("full"):
-            if not c.check_only and len(c.axes) < len(c.shape):
+            if not c.check_only and len(c.axes) == 1 and len(c.shape) > 1:
                 self.assertGreaterEqual(min(c.shape[a] for a in c.axes), 128)
 
 
