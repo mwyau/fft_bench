@@ -28,7 +28,8 @@
       "repo": "https://github.com/mwyau/numpy.git",
       "ref": "b7053b3dc6cd0631b6a1d4445750cd5423eb09b5",
       "fft_backend": "duccfft",
-      "source_ref": "enh/duccfft-simd-improvements"
+      "source_ref": "enh/duccfft-simd-improvements",
+      "dispatch": true
     },
     {
       "name": "numpy-pocketfft",

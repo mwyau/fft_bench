@@ -257,6 +257,7 @@ def environment(candidate):
         from numpy._core import _multiarray_umath as m
         data["numpy_cpu_baseline"] = list(m.__cpu_baseline__)
         data["numpy_cpu_dispatch"] = list(m.__cpu_dispatch__)
+        data["numpy_disabled_cpu_features"] = os.environ.get("NPY_DISABLE_CPU_FEATURES", "")
     if candidate == "ducc0":
         import ducc0
         data.update(ducc_version=ducc0.__version__, ducc_file=ducc0.__file__,
@@ -304,6 +305,8 @@ def main():
             raise RuntimeError(f"DUCC dispatch selected {meta.get('psabi_level')}, expected {level}")
         if args.candidate == "numpy":
             target = f"X86_V{level}"
+            if meta.get("numpy_feature_mask", meta["numpy_disabled_cpu_features"]) != meta["numpy_disabled_cpu_features"]:
+                raise RuntimeError("NumPy FFT feature mask differs from build metadata")
             if meta.get("fft_target") not in (target, f"baseline({target})"):
                 raise RuntimeError(f"NumPy FFT selected {meta.get('fft_target')}, expected {target}")
     counts = {"pass": 0, "skip": 0, "fail": 0}

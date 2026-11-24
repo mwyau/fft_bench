@@ -83,6 +83,28 @@ def title(panel):
     return " / ".join(pieces) + "\n" + f"axes ({dims}); batch {batches}"
 
 
+MIN_LENGTHS = 4
+
+
+def plot_group(group):
+    return "1d-long" if group in ("1d", "long") else group
+
+
+def eligible_series(series, minimum=MIN_LENGTHS):
+    """Keep only real sweeps, not single points or short line segments."""
+    eligible = {key: rows for key, rows in series.items()
+                if len({p["length"] for p in rows}) >= minimum}
+    # Require a comparable sweep: two candidates with enough common cases.
+    comparable = set()
+    case_ids = {key: {p["case_id"]: p["length"] for p in rows}
+                for key, rows in eligible.items()}
+    for a, left in case_ids.items():
+        for b, right in case_ids.items():
+            if a != b and len({left[c] for c in left.keys() & right.keys()}) >= minimum:
+                comparable.update((a, b))
+    return {key: rows for key, rows in eligible.items() if key in comparable}
+
+
 def draw(root, out):
     import matplotlib
     matplotlib.use("Agg")
@@ -107,13 +129,15 @@ def draw(root, out):
         # Native one-shot and reusable-plan execution are distinct legend entries.
         series = (p["candidate"], p["package"], p["level"],
                   p["timing_mode"], p["run_status"])
-        groups[(p["api"], p["group"])][p["panel"]][series].append(p)
+        groups[(p["api"], plot_group(p["group"]))][p["panel"]][series].append(p)
 
     index = [f"# FFT runtimes: {cpu}", "",
              "Absolute median runtime per call in microseconds; log-log axes.",
              "Length = product of transformed dimensions (not batch size).",
              "Each panel fixes transform, precision, layout, threads, axes, batch shape, "
-             "buffer mode and normalization. A single measured length is a marker.",
+             "buffer mode and normalization. 1D and long 1D cases share a plot.",
+             "A panel requires at least two candidates with four distinct matched lengths; "
+             "shorter series and sparse panels are omitted. All timings remain in points.csv.",
              "† Candidate run failed elsewhere; only passing cases are plotted.",
              "Reusable-plan execution excludes plan creation. See points.csv for exact shapes.",
              ""]
@@ -121,7 +145,11 @@ def draw(root, out):
     for (api, group), panels in sorted(groups.items()):
         names = []
         # At most six panels per page, rather than one enormous group figure.
-        ordered = sorted(panels)
+        eligible = {panel: eligible_series(series) for panel, series in panels.items()}
+        ordered = sorted(panel for panel, series in eligible.items() if series)
+        if not ordered:
+            index += [f"## {api} / {group}", "", "No comparable length sweep; see tables.", ""]
+            continue
         for start in range(0, len(ordered), 6):
             page = ordered[start:start + 6]
             nrows = math.ceil(len(page) / 2)
@@ -129,7 +157,7 @@ def draw(root, out):
                                     squeeze=False)
             handles = {}
             for ax, panel in zip(axs.flat, page):
-                for key, rows in sorted(panels[panel].items()):
+                for key, rows in sorted(eligible[panel].items()):
                     label, package, level, timing, status = key
                     legend = f"{label} / {timing}" + (" †" if status == "fail" else "")
                     # Multiple different shapes at a single length remain separate
@@ -171,7 +199,7 @@ def draw(root, out):
     if not points:
         index.append("No passing timed cases. Correctness-only groups have no runtime plot.")
     (out / "README.md").write_text("\n".join(index) + "\n")
-    return len(groups)
+    return sum(any(eligible_series(s) for s in panels.values()) for panels in groups.values())
 
 
 def main():

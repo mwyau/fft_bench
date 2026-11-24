@@ -1,6 +1,7 @@
 """Build pinned candidates and compare them on one Linux x86-64 host."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -179,14 +180,22 @@ def main():
             folder = bundle / label
             folder.mkdir()
             wheel = meta.get("wheel")
+            wheel_path = None
             if wheel:
-                shutil.copy2(Path(py).parent.parent.parent / "wheel" / wheel, folder / wheel)
+                wheel_source = Path(py).parent.parent.parent / "wheel" / wheel
+                digest = hashlib.sha256(wheel_source.read_bytes()).hexdigest()
+                cached_wheel = bundle / "wheels" / digest / wheel
+                cached_wheel.parent.mkdir(parents=True, exist_ok=True)
+                if not cached_wheel.exists():
+                    shutil.copy2(wheel_source, cached_wheel)
+                wheel_path = str(cached_wheel.relative_to(bundle))
             if executable:
                 shutil.copy2(executable, folder / "fft_native")
             overrides = {key: (env or {}).get(key) for key in
                          ("DUCC0_MAX_PSABI_LEVEL", "NPY_DISABLE_CPU_FEATURES")}
             manifest.append(dict(label=label, candidate=candidate, meta=meta,
-                                 wheel=wheel, native=bool(executable), env=overrides))
+                                 wheel=wheel, wheel_path=wheel_path,
+                                 native=bool(executable), env=overrides))
             (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
             return
         cmd = [py, ROOT / "bench.py", "--candidate", candidate, "--suite", args.suite,
@@ -212,6 +221,7 @@ def main():
     base = venv(work / "reference", config, out / "reference.log")
     if args.from_bundle:
         source = args.from_bundle.resolve()
+        installed = {}
         for entry in json.loads((source / "manifest.json").read_text()):
             label, meta = entry["label"], entry["meta"]
             level = meta.get("requested_level")
@@ -223,9 +233,13 @@ def main():
                 py = base
                 folder = source / label
                 if entry["wheel"]:
-                    py = venv(work / label, config, out / (label + ".log"))
-                    command([py, "-m", "pip", "install", "--force-reinstall", "--no-deps",
-                             folder / entry["wheel"]], out / (label + ".log"))
+                    wheel = source / entry["wheel_path"] if entry.get("wheel_path") else folder / entry["wheel"]
+                    if wheel not in installed:
+                        py = venv(work / label, config, out / (label + ".log"))
+                        command([py, "-m", "pip", "install", "--force-reinstall", "--no-deps",
+                                 wheel], out / (label + ".log"))
+                        installed[wheel] = py
+                    py = installed[wheel]
                 env = dict(os.environ)
                 for key, value in entry["env"].items():
                     env.pop(key, None)
@@ -353,7 +367,9 @@ def main():
                                     env["DUCC0_MAX_PSABI_LEVEL"] = str(level)
                                 else:
                                     env["NPY_DISABLE_CPU_FEATURES"] = ",".join(
-                                        f"X86_V{v}" for v in targets if v > level)
+                                        f"X86_V{v}" for v in reversed(targets) if v > level)
+                                    meta["numpy_feature_mask"] = env["NPY_DISABLE_CPU_FEATURES"]
+                                    meta["numpy_build_baseline"] = "x86-64-v2"
                             execute(label, py, "ducc0" if kind == "ducc" else "numpy", meta, env=env)
                         attempt(prefix, python_profile)
                 if kind == "ducc":

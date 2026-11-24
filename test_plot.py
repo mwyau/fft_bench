@@ -1,6 +1,6 @@
 import unittest
 
-from plot import workload
+from plot import eligible_series, plot_group, workload
 
 
 class TestPlot(unittest.TestCase):
@@ -18,3 +18,15 @@ class TestPlot(unittest.TestCase):
                    shape=[1024], axes=[0], lengths=[1031],
                    mode="default", norm="backward", transform_type=2)
         self.assertEqual(workload(row)[0], 1031)
+
+    def test_short_sweeps_omitted(self):
+        def rows(ns):
+            return [dict(length=n, case_id=str(n)) for n in ns]
+        series = {"a": rows([1, 2, 3, 4]), "b": rows([1, 2, 3, 4]),
+                  "short": rows([1, 2, 3]), "disjoint": rows([5, 6, 7, 8])}
+        self.assertEqual(set(eligible_series(series)), {"a", "b"})
+        self.assertFalse(eligible_series({"a": rows([1, 2, 3, 4])}))
+
+    def test_combined_rank_one_sweep(self):
+        self.assertEqual(plot_group("1d"), plot_group("long"))
+        self.assertNotEqual(plot_group("batched"), plot_group("1d"))
