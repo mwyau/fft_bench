@@ -1,0 +1,25 @@
+{
+  "reference_numpy": "numpy==2.3.5",
+  "scipy": "scipy==1.17.0",
+  "ducc": [
+    {
+      "name": "ducc",
+      "repo": "https://github.com/mreineck/ducc.git",
+      "ref": "bf4f0e2f2f91dba6e270b8302904dbb6a42d6af3"
+    }
+  ],
+  "numpy": [
+    {
+      "name": "numpy",
+      "repo": "https://github.com/numpy/numpy.git",
+      "ref": "5969d7ba7f823e83a8702bcc2f85af4e1fd78bd4"
+    }
+  ],
+  "admiral": [
+    {
+      "name": "admiral",
+      "repo": "https://github.com/DiamonDinoia/admiral.git",
+      "ref": "a0633dfdf1006915a7390de12e434bdfdaa85a98"
+    }
+  ]
+}
