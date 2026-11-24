@@ -229,7 +229,9 @@ Call make_call(const Config& c, I* in, O* out) {
                 (c.type==2 ? admiral::r2r_kind::dct2 : admiral::r2r_kind::dct3) :
                 (c.type==2 ? admiral::r2r_kind::dst2 : admiral::r2r_kind::dst3);
             auto p = std::make_shared<admiral::plan_r2r<T>>(shape[0],k,1,opts);
-            return [=]{ p->forward(in,out,f); };
+            // Admiral's explicit type-III scale is relative to its normalized inverse.
+            const T r2r_scale = c.type == 3 ? f * T(2) * T(shape[0]) : f;
+            return [=]{ p->forward(in,out,r2r_scale); };
         }
     }
 #endif

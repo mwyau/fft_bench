@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 
 from run import CPP_REFERENCE, PY_REFERENCE, REFERENCE
+from lengths import transform_lengths, length_class, write_v4_report
 
 
 def read_json(path, default):
@@ -37,15 +38,15 @@ def read_runner(root):
     runner = root.name
     print(f"### {runner}: {cpu}\n")
     print("Usable ISA:", ", ".join(f"v{v}" for v in sorted(host.get("usable_levels", []))), "\n")
-    print("| Candidate | Run | Passed | Skipped | Failed |")
-    print("|---|---|---:|---:|---:|")
+    print("| Candidate | Run | Passed | Skipped | Expected failures | Failed |")
+    print("|---|---|---:|---:|---:|---:|")
     timed, metas, statuses = {}, {}, {}
     for run in runs:
         label = run["label"]
         path = root / (label + ".jsonl")
         rows = [json.loads(line) for line in path.read_text().splitlines() if line] if path.is_file() else []
-        counts = [sum(row["status"] == s for row in rows) for s in ("pass", "skip", "fail")]
-        print(f"| {label} | {run['status']} | {counts[0]} | {counts[1]} | {counts[2]} |")
+        counts = [sum(row["status"] == s for row in rows) for s in ("pass", "skip", "xfail", "fail")]
+        print(f"| {label} | {run['status']} | {counts[0]} | {counts[1]} | {counts[2]} | {counts[3]} |")
         if run["status"] not in ("pass", "fail"):
             continue
         meta = read_json(path.with_suffix(".meta.json"), {})
@@ -76,6 +77,8 @@ def read_runner(root):
             records.append(dict(runner=runner, cpu=cpu, api=api, level=level,
                                 package=package, candidate=label, revision=revision,
                                 group=row["group"], case_id=case_id,
+                                lengths="x".join(map(str, transform_lengths(row))),
+                                length_class=length_class(transform_lengths(row)),
                                 reference_mode=left, timing_mode=right,
                                 run_status=statuses[label], reference_status=statuses[baseline],
                                 ratio=row["median_ns"] / refrow["median_ns"]))
@@ -165,6 +168,9 @@ def main():
           "Candidate/reference median time; **1.000 = reference, lower is faster**. "
           "Each cell is a geometric mean of matched passing cases, followed by "
           "(case-runner pairs / contributing runners). Missing cells are not imputed. "
+          "alloc = allocating output; out = caller-supplied output; inplace = overwrite input. "
+          "plan-execute/estimate = execute a reusable plan created without measured planning. "
+          "See v4.md for per-length, factorization and worst-case tables. "
           "Candidate case coverage can differ. † At least one contributing runner had a "
           "failed candidate or reference run; only individually passing cases contribute. "
           "Native reusable-plan timings exclude planning.\n")
@@ -197,9 +203,10 @@ def main():
             result = aggregate(rows, "isa", cpu, by_isa=True)
             tables(result)
             grouped.extend(result)
+    write_v4_report(out, records)
     write_csv(out / "normalized.csv", records,
               ["runner", "cpu", "api", "level", "package", "candidate", "revision",
-               "group", "case_id", "reference_mode", "timing_mode", "run_status",
+               "group", "case_id", "lengths", "length_class", "reference_mode", "timing_mode", "run_status",
                "reference_status", "ratio"])
     write_csv(out / "grouped.csv", grouped,
               ["view", "scope", "api", "isa", "group", "reference_mode", "column",

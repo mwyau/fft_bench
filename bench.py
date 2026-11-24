@@ -306,7 +306,7 @@ def main():
             target = f"X86_V{level}"
             if meta.get("fft_target") not in (target, f"baseline({target})"):
                 raise RuntimeError(f"NumPy FFT selected {meta.get('fft_target')}, expected {target}")
-    counts = {"pass": 0, "skip": 0, "fail": 0}
+    counts = {"pass": 0, "skip": 0, "xfail": 0, "fail": 0}
     with args.output.open("w") as stream:
         for case in rows:
             row = dict(asdict(case), case_id=case.id, label=meta["label"])
@@ -318,8 +318,13 @@ def main():
             except Unsupported as exc:
                 row.update(status="skip", reason=str(exc))
             except Exception as exc:
-                row.update(status="fail", reason=f"{type(exc).__name__}: {exc}")
-                traceback.print_exc()
+                known = (meta.get("reference") and meta.get("release") == "0.42.0"
+                         and case.group == "empty" and isinstance(exc, RuntimeError)
+                         and "arrays must be at least 1D and not have zero size" in str(exc))
+                row.update(status="xfail" if known else "fail",
+                           reason=f"{type(exc).__name__}: {exc}")
+                if not known:
+                    traceback.print_exc()
             counts[row["status"]] += 1
             stream.write(json.dumps(row) + "\n")
             stream.flush()
