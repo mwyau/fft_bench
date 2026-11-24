@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import math
 import os
 from pathlib import Path
 import platform
@@ -22,7 +21,7 @@ for variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
 import numpy as np
 
 from cases import cases
-from reference import Unsupported, check, fft_call, prepare
+from reference import Unsupported, check, fft_call, prepare, types
 
 
 def capability(case, candidate):
@@ -49,6 +48,11 @@ def python_call(case, candidate, x, ref, dtype, kernel, axes, lengths):
     kind = case.kind
     out = x if case.mode == "inplace" else np.empty(ref.shape, dtype=dtype)
     explicit = case.mode in ("out", "inplace")
+
+    def bind(fn):
+        fn.expected_output = out if explicit or kind.startswith("conv_") else None
+        return fn
+
     if candidate in ("numpy", "scipy"):
         if candidate == "numpy":
             module = np.fft
@@ -58,8 +62,8 @@ def python_call(case, candidate, x, ref, dtype, kernel, axes, lengths):
             kwargs = {"workers": case.threads}
         if kind in ("dct", "dst"):
             fn = getattr(module, kind + "n")
-            return lambda: fn(x, axes=axes, type=case.transform_type, **kwargs)
-        return lambda: fft_call(module, kind, x, axes, lengths, case.norm, **kwargs)
+            return bind(lambda: fn(x, axes=axes, type=case.transform_type, **kwargs))
+        return bind(lambda: fft_call(module, kind, x, axes, lengths, case.norm, **kwargs))
 
     import ducc0
     fft = ducc0.fft
@@ -70,20 +74,20 @@ def python_call(case, candidate, x, ref, dtype, kernel, axes, lengths):
     if explicit:
         kwargs["out"] = out
     if kind in ("fft", "ifft"):
-        return lambda: fft.c2c(x, forward=not inverse, **kwargs)
+        return bind(lambda: fft.c2c(x, forward=not inverse, **kwargs))
     if kind == "rfft":
-        return lambda: fft.r2c(x, forward=True, **kwargs)
+        return bind(lambda: fft.r2c(x, forward=True, **kwargs))
     if kind == "irfft":
-        return lambda: fft.c2r(x, lastsize=lengths[-1], forward=False, **kwargs)
+        return bind(lambda: fft.c2r(x, lastsize=lengths[-1], forward=False, **kwargs))
     if kind in ("dct", "dst"):
-        return lambda: getattr(fft, kind)(x, type=case.transform_type, **kwargs)
+        return bind(lambda: getattr(fft, kind)(x, type=case.transform_type, **kwargs))
     if kind == "r2r_fftpack":
-        return lambda: fft.r2r_fftpack(x, real2hermitian=True, forward=True, **kwargs)
+        return bind(lambda: fft.r2r_fftpack(x, real2hermitian=True, forward=True, **kwargs))
     if kind == "r2r_fftw":
-        return lambda: fft.r2r_fftw(x, forward=True, **kwargs)
+        return bind(lambda: fft.r2r_fftw(x, forward=True, **kwargs))
     if kind.startswith("conv_"):
-        return lambda: fft.convolve_axis(x, out, axes[0], kernel, nthreads=case.threads)
-    return lambda: getattr(fft, kind)(x, **kwargs)
+        return bind(lambda: fft.convolve_axis(x, out, axes[0], kernel, nthreads=case.threads))
+    return bind(lambda: getattr(fft, kind)(x, **kwargs))
 
 
 def timings(fn, reset, samples, target_ms, check_only):
@@ -117,26 +121,14 @@ def native_call(case, executable, x, storage, ref, dtype, kernel, axes, lengths,
         raise Unsupported("native API requires explicit resizing")
     if case.mode in ("out", "alloc"):
         raise Unsupported("Python output allocation comparison")
-    if x.size == 0:
-        raise Unsupported("native zero-batch semantics not standardized")
     if case.kind.startswith("conv_") or case.kind == "r2r_fftpack":
         raise Unsupported("native adapter does not yet implement this transform")
     def csv(values):
         return ",".join(map(str, values))
-    count = math.prod(lengths)
     inverse = case.kind in ("ifft", "irfft")
-    scale = {"backward": 1 / count if inverse else 1,
-             "forward": 1 if inverse else 1 / count,
-             "ortho": 1 / math.sqrt(count)}[case.norm]
-    if case.precision == "ld":
-        # Compute the normalization in native extended precision.
-        scale = {"backward": "inverse" if inverse else "one",
-                 "forward": "one" if inverse else "inverse",
-                 "ortho": "ortho"}[case.norm]
-    else:
-        scale = {"backward": "inverse" if inverse else "one",
-                 "forward": "one" if inverse else "inverse",
-                 "ortho": "ortho"}[case.norm]
+    scale = {"backward": "inverse" if inverse else "one",
+             "forward": "one" if inverse else "inverse",
+             "ortho": "ortho"}[case.norm]
     with tempfile.TemporaryDirectory() as work:
         infile, outfile = Path(work) / "input.bin", Path(work) / "output.bin"
         storage.ravel(order="K").tofile(infile)
@@ -157,7 +149,61 @@ def native_call(case, executable, x, storage, ref, dtype, kernel, axes, lengths,
     return got, report
 
 
+def invalid_case(case, candidate):
+    if candidate == "native":
+        raise Unsupported("native invalid-input contract not implemented")
+    real, complex_ = types(case)
+    axes = case.axes
+    kind = case.kind
+    shape = list(case.shape)
+    if kind == "irfft":
+        shape[axes[-1]] = shape[axes[-1]] // 2 + 1
+    x = np.empty(shape, dtype=real if kind == "rfft" else complex_)
+    lengths = tuple(case.shape[a] for a in axes)
+    try:
+        if candidate == "ducc0":
+            import ducc0
+            f = ducc0.fft
+            if kind in ("fft", "ifft"):
+                f.c2c(x, axes=axes, forward=kind == "fft")
+            elif kind == "rfft":
+                f.r2c(x, axes=axes)
+            else:
+                f.c2r(x, axes=axes, lastsize=lengths[-1], forward=False)
+        else:
+            if candidate == "numpy":
+                module = np.fft
+            else:
+                import scipy.fft as module
+            fft_call(module, kind, x, axes, lengths)
+    except (ValueError, RuntimeError) as exc:
+        return dict(expected_exception=type(exc).__name__, message=str(exc))
+    raise AssertionError("accepted a zero-length transform axis")
+
+
+def inplace_real(case, candidate):
+    if candidate != "ducc0":
+        raise Unsupported("DUCC Python padded real in-place API")
+    import ducc0
+    import scipy.fft as sp_fft
+    real, complex_ = types(case)
+    n = case.shape[-1]
+    buf = np.empty((*case.shape[:-1], n // 2 + 1), dtype=complex_)
+    view = buf.view(real)[..., :n]
+    source = np.random.default_rng(1234).standard_normal(case.shape).astype(real)
+    view[:] = source
+    ducc0.fft.r2c(view, axes=case.axes, out=buf, nthreads=1)
+    e1 = check(buf, sp_fft.rfftn(source.astype(np.float64), axes=case.axes), complex_, case)
+    ducc0.fft.c2r(buf, axes=case.axes, out=view, lastsize=n, forward=False, inorm=2, nthreads=1)
+    e2 = check(view, source, real, case)
+    return dict(max_error=max(e1[0], e2[0]), l2_error=max(e1[1], e2[1]))
+
+
 def run_case(case, args):
+    if case.group == "invalid":
+        return invalid_case(case, args.candidate)
+    if case.group == "inplace_real":
+        return inplace_real(case, args.candidate)
     if case.threads > len(os.sched_getaffinity(0)):
         raise Unsupported("requested threads exceed available logical CPUs")
     if args.candidate != "native":
@@ -174,6 +220,8 @@ def run_case(case, args):
     fn = python_call(case, args.candidate, x, ref, dtype, kernel, axes, lengths)
     original = x.copy()
     got = fn()
+    if fn.expected_output is not None and got is not fn.expected_output:
+        raise AssertionError("explicit output buffer was not returned")
     errors = check(got, ref, dtype, case)
     if case.mode == "inplace":
         if not np.shares_memory(x, got):
@@ -244,6 +292,14 @@ def main():
     meta.update(environment(args.candidate))
     meta.update(candidate=args.candidate, label=args.label or args.candidate, suite=args.suite)
     args.output.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    if meta.get("build_mode") == "dispatch":
+        level = meta["requested_level"]
+        if args.candidate == "ducc0" and meta.get("psabi_level") != level:
+            raise RuntimeError(f"DUCC dispatch selected {meta.get('psabi_level')}, expected {level}")
+        if args.candidate == "numpy":
+            target = f"X86_V{level}"
+            if meta.get("fft_target") not in (target, f"baseline({target})"):
+                raise RuntimeError(f"NumPy FFT selected {meta.get('fft_target')}, expected {target}")
     counts = {"pass": 0, "skip": 0, "fail": 0}
     with args.output.open("w") as stream:
         for case in rows:

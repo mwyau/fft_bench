@@ -91,6 +91,8 @@ def build_python(kind, spec, src, level, work, config, log, jobs):
     if len(wheels) != 1:
         raise RuntimeError("expected one source-built wheel")
     command([py, "-m", "pip", "install", "--force-reinstall", "--no-deps", wheels[0]], log)
+    for i, file in enumerate((work / "build").rglob("compile_commands.json")):
+        shutil.copyfile(file, log.with_suffix(f".compile-{i}.json"))
     return py, wheels[0].name
 
 
@@ -103,6 +105,7 @@ def build_native(kind, src, target, work, log, jobs):
     command(["cmake", "-S", ROOT / "cpp", "-B", work, "-G", "Ninja",
              "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", *args], log)
     command(["cmake", "--build", work, "--parallel", jobs, "--verbose"], log)
+    shutil.copyfile(work / "compile_commands.json", log.with_suffix(".compile.json"))
     return work / "fft_native"
 
 
@@ -122,7 +125,12 @@ def main():
     if selected - set(KINDS) or args.jobs < 1:
         p.error("invalid --only or --jobs")
     config = json.loads(args.config.read_text())
+    names = [s["name"] for k in ("ducc", "numpy", "admiral") for s in config.get(k, [])]
+    if len(names) != len(set(names)) or set(names) & {"scipy", "fftw", "reference"}:
+        p.error("source names must be distinct and not reserved")
     out = args.output.resolve()
+    if out.exists() and any(out.iterdir()):
+        p.error("--output must be an empty directory")
     out.mkdir(parents=True, exist_ok=True)
     args.work.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="run-", dir=args.work.resolve()))

@@ -41,33 +41,34 @@ def direct_fft(x, axis, inverse=False):
 
 def direct_r2r(x, axis, kind, ty):
     n = x.shape[axis]
-    j = np.arange(n, dtype=np.float64)[None, :]
+    j = np.arange(n, dtype=np.longdouble)[None, :]
+    pi = np.arccos(np.longdouble(-1))
     data = np.moveaxis(x, axis, -1)
     result = np.empty(data.shape, dtype=np.float64)
     for start in range(0, n, 128):
-        k = np.arange(start, min(n, start + 128), dtype=np.float64)[:, None]
+        k = np.arange(start, min(n, start + 128), dtype=np.longdouble)[:, None]
         if kind == "dct":
             if ty == 1:
-                m = 2 * np.cos(np.pi * k * j / (n - 1))
+                m = 2 * np.cos(pi * k * j / (n - 1))
                 m[:, (0, -1)] *= 0.5
             elif ty == 2:
-                m = 2 * np.cos(np.pi * k * (j + 0.5) / n)
+                m = 2 * np.cos(pi * k * (j + 0.5) / n)
             elif ty == 3:
-                m = 2 * np.cos(np.pi * (k + 0.5) * j / n)
+                m = 2 * np.cos(pi * (k + 0.5) * j / n)
                 m[:, 0] *= 0.5
             else:
-                m = 2 * np.cos(np.pi * (k + 0.5) * (j + 0.5) / n)
+                m = 2 * np.cos(pi * (k + 0.5) * (j + 0.5) / n)
         else:
             if ty == 1:
-                m = 2 * np.sin(np.pi * (k + 1) * (j + 1) / (n + 1))
+                m = 2 * np.sin(pi * (k + 1) * (j + 1) / (n + 1))
             elif ty == 2:
-                m = 2 * np.sin(np.pi * (k + 1) * (j + 0.5) / n)
+                m = 2 * np.sin(pi * (k + 1) * (j + 0.5) / n)
             elif ty == 3:
-                m = 2 * np.sin(np.pi * (k + 0.5) * (j + 1) / n)
+                m = 2 * np.sin(pi * (k + 0.5) * (j + 1) / n)
                 m[:, -1] *= 0.5
             else:
-                m = 2 * np.sin(np.pi * (k + 0.5) * (j + 0.5) / n)
-        result[..., start:start + len(k)] = data @ m.T
+                m = 2 * np.sin(pi * (k + 0.5) * (j + 0.5) / n)
+        result[..., start:start + len(k)] = data @ m.astype(np.float64).T
     return np.moveaxis(result, -1, axis)
 
 

@@ -194,6 +194,7 @@ Call make_call(const Config& c, I* in, O* out) {
     if constexpr (std::is_same_v<I,C> && std::is_same_v<O,C>) {
         if (dense && all_axes) {
             auto p = std::make_shared<admiral::plan<T>>(shape,opts);
+            if (c.mode=="inplace") return [=]{ if (forward) p->forward(out,f); else p->inverse(out,f); };
             return [=]{ if (forward) p->forward(in,out,f); else p->inverse(in,out,f); };
         }
         if constexpr (!std::is_same_v<T,long double>) {
@@ -234,13 +235,16 @@ void run(const Config& c) {
     std::ifstream file(c.infile, std::ios::binary | std::ios::ate);
     if (!file) throw std::runtime_error("cannot open input");
     auto bytes = file.tellg();
+#if !defined(BENCH_DUCC)
+    if (size(c.in_shape) == 0) throw Unsupported("empty batch not supported by native adapter");
+#endif
     if (bytes < 0 || bytes % sizeof(I)) throw std::runtime_error("invalid input size");
-    std::vector<I> storage(size_t(bytes)/sizeof(I));
+    std::vector<I> storage(std::max<size_t>(1,size_t(bytes)/sizeof(I)));
     file.seekg(0);
     if (!file.read(reinterpret_cast<char*>(storage.data()),bytes))
         throw std::runtime_error("cannot read input");
     auto original = storage;
-    std::vector<O> output(size(c.out_shape));
+    std::vector<O> output(std::max<size_t>(1,size(c.out_shape)));
     I* in = storage.data()+c.offset;
     O* out = output.data();
     if (c.mode == "inplace") {

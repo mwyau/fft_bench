@@ -48,8 +48,14 @@ def cases(suite):
     # Small transforms test special cases, not batched throughput.
     tiny = (1, 2, 3, 7, 8, 16, 31, 32) + ((4, 5, 11, 23, 29, 33, 63, 64, 65) if full else ())
     add("edge", [(n,) for n in tiny], complex_ops + real_ops, check_only=True)
-    add("empty", [(0, 128)], complex_ops + real_ops, axes=(1,), check_only=True)
-    add("overhead", [(1,), (8,), (32,), (128,)], ("fft", "rfft"), modes=("alloc", "out"))
+    add("empty", [(0, 128)], complex_ops + real_ops + ("dct", "dst"), axes=(1,), check_only=True)
+    add("empty", [(128, 0)], complex_ops + real_ops, axes=(0,), check_only=True)
+    add("empty", [(0, 4, 8)], complex_ops + real_ops + ("dct", "dst"), axes=(1, 2), check_only=True)
+    add("empty", [(4, 0, 8)], complex_ops + real_ops, axes=(0, 2), check_only=True)
+    add("invalid", [(0,)], ("fft", "ifft", "rfft"), check_only=True)
+    add("invalid", [(4, 0, 8)], complex_ops + real_ops, axes=(1, 2), check_only=True)
+    add("inplace_real", [(8, 127), (8, 256), (16, 17, 31)], ("rfft",), check_only=True)
+    add("overhead", [(1,), (8,), (32,), (128,)], ("fft", "rfft"), modes=("default", "out"))
 
     n1 = (128, 257, 1024, 4095, 4096, 4097)
     if full:
