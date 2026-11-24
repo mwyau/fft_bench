@@ -15,11 +15,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parent
 KINDS = ("ducc-python", "ducc-cpp", "ducc-cpp23", "numpy", "numpy-pocketfft", "scipy", "fftw", "admiral")
 DUCC_CPP_STANDARDS = {"ducc-cpp": 17, "ducc-cpp23": 23}
-# ducc0_0_42_0, pinned independently of the candidate configuration.
-REFERENCE = dict(name="ducc-0-42", repo="https://github.com/mreineck/ducc.git",
-                 ref="42ce8ab5c5d79e0e2fd9af4a09c2ea4693520e1b")
-PY_REFERENCE = "ducc-0-42"
-CPP_REFERENCE = "ducc-0-42-cpp"
+from resolve_sources import resolve
 
 
 def command(args, log, *, env=None, cwd=None):
@@ -137,13 +133,16 @@ def main():
     stage = p.add_mutually_exclusive_group()
     stage.add_argument("--build-only", type=Path, metavar="BUNDLE")
     stage.add_argument("--from-bundle", type=Path, metavar="BUNDLE")
+    p.add_argument("--resolved", action="store_true", help="config already resolved by resolve_sources.py")
     args = p.parse_args()
     selected = set(args.only.split(","))
     if selected - set(KINDS) or args.jobs < 1:
         p.error("invalid --only or --jobs")
     config = json.loads((args.from_bundle / "sources.json" if args.from_bundle else args.config).read_text())
+    if not args.from_bundle and not args.resolved:
+        config = resolve(config)
     names = [s["name"] for k in ("ducc", "numpy", "admiral") for s in config.get(k, [])]
-    if len(names) != len(set(names)) or set(names) & {"scipy", "fftw", "reference", PY_REFERENCE, CPP_REFERENCE}:
+    if len(names) != len(set(names)) or set(names) & {"scipy", "fftw", "reference"}:
         p.error("source names must be distinct and not reserved")
     out = args.output.resolve()
     if out.exists() and any(out.iterdir()):
@@ -239,35 +238,9 @@ def main():
         return int(not runs or any(r["status"] == "fail" for r in runs)
                    or not any(r["status"] == "pass" for r in runs))
 
-    # References are mandatory for the selected APIs, even with --only.
+    # The upstream v1 build is required for either selected API.
     need_python = bool(selected & {"ducc-python", "numpy", "numpy-pocketfft", "scipy"})
     need_cpp = bool(selected & {"ducc-cpp", "ducc-cpp23", "fftw", "admiral"})
-    ref_src = work / "ducc-0-42-source"
-    ref_sha = None
-    if need_python or need_cpp:
-        try:
-            ref_sha = checkout(REFERENCE, ref_src, out / "ducc-0-42-checkout.log")
-        except Exception as exc:
-            record("ducc-0-42-checkout", "fail", str(exc))
-
-    ref_meta = dict(repo=REFERENCE["repo"], ref=REFERENCE["ref"], sha=ref_sha,
-                    backend="ducc", architecture="x86-64", requested_level=1,
-                    build_mode="fixed", reference=True, release="0.42.0")
-    if need_python and ref_sha:
-        def python_reference():
-            folder = work / PY_REFERENCE
-            folder.mkdir()
-            py, wheel = build_python("ducc", REFERENCE, ref_src, 1, folder, config,
-                                     out / (PY_REFERENCE + ".log"), args.jobs)
-            execute(PY_REFERENCE, py, "ducc0", dict(ref_meta, wheel=wheel))
-        attempt(PY_REFERENCE, python_reference)
-    if need_cpp and ref_sha:
-        def cpp_reference():
-            exe = build_native("ducc", ref_src, "x86-64", work / CPP_REFERENCE,
-                               out / (CPP_REFERENCE + ".log"), args.jobs)
-            execute(CPP_REFERENCE, base, "native", dict(ref_meta, cxx_standard=17),
-                    executable=exe)
-        attempt(CPP_REFERENCE, cpp_reference)
 
     if "scipy" in selected:
         attempt("scipy", lambda: execute("scipy", base, "scipy",
@@ -284,7 +257,7 @@ def main():
     for kind in ("ducc", "numpy", "admiral"):
         relevant = {"ducc": {"ducc-python", *DUCC_CPP_STANDARDS}, "numpy": {"numpy", "numpy-pocketfft"},
                     "admiral": {"admiral"}}[kind]
-        if not relevant & selected:
+        if not relevant & selected and kind != "ducc":
             continue
         for spec in config.get(kind, []):
             defaults = ("ducc-python", "ducc-cpp") if kind == "ducc" else (kind,)
@@ -292,6 +265,12 @@ def main():
             if not candidates or candidates - relevant:
                 p.error(f"invalid candidates for {kind}: {sorted(candidates)}")
             enabled = candidates & selected
+            is_reference = kind == "ducc" and spec.get("reference", False)
+            if is_reference:
+                if need_python:
+                    enabled.add("ducc-python")
+                if need_cpp:
+                    enabled.add("ducc-cpp")
             if not enabled:
                 continue
             name = spec["name"]
@@ -328,7 +307,9 @@ def main():
                 attempt(label, pocketfft)
                 if "numpy" not in enabled:
                     continue
-            targets = (1, 3, 4) if kind == "ducc" else (2, 3, 4)
+            targets = tuple(spec.get("levels", (1, 3, 4))) if kind == "ducc" else (2, 3, 4)
+            if is_reference:
+                targets = tuple(sorted(set(targets) | {1}))
             py_selected = "ducc-python" in enabled if kind == "ducc" else "numpy" in enabled
             dispatch_build = spec.get("dispatch", False)
             dispatch_py = None
@@ -344,7 +325,8 @@ def main():
                     record(label, "fail", str(exc))
             for level in targets:
                 prefix = name + ("-py" if kind == "ducc" else "") + f"-v{level}"
-                if py_selected:
+                if py_selected and ("ducc-python" in selected or kind != "ducc"
+                                    or (is_reference and level == 1)):
                     if level not in build_levels:
                         record(prefix, "skip", "host/OS does not support requested ISA")
                     elif not dispatch_build or dispatch_py:
@@ -359,6 +341,8 @@ def main():
                                 py, wheel = build_python(kind, spec, src, level, folder, config, log, args.jobs)
                             meta = dict(origin, architecture=arch(level), requested_level=level,
                                         build_mode="dispatch" if dispatch_build else "fixed", wheel=wheel)
+                            if is_reference and level == 1:
+                                meta["reference"] = True
                             if kind == "numpy":
                                 meta["expected_fft_backend"] = spec.get("fft_backend", "duccfft")
                             env = dict(os.environ)
@@ -374,7 +358,7 @@ def main():
                         attempt(prefix, python_profile)
                 if kind == "ducc":
                     for candidate, standard in DUCC_CPP_STANDARDS.items():
-                        if candidate not in enabled:
+                        if candidate not in enabled or (candidate not in selected and level != 1):
                             continue
                         suffix = "cpp" if standard == 17 else f"cpp{standard}"
                         label = name + f"-{suffix}-v{level}"
@@ -388,7 +372,8 @@ def main():
                                                cxx_standard=standard)
                             execute(label, base, "native", dict(origin, architecture=arch(level),
                                     requested_level=level, build_mode="fixed",
-                                    cxx_standard=standard), executable=exe)
+                                    cxx_standard=standard,
+                                    reference=bool(is_reference and level == 1 and standard == 17)), executable=exe)
 
                         attempt(label, ducc_cpp)
 

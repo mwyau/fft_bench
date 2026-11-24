@@ -1,4 +1,4 @@
-"""Normalize FFT timings to DUCC 0.42.0 v1 within each runner."""
+"""Normalize FFT timings to the resolved upstream DUCC v1 within each runner."""
 
 import argparse
 from collections import defaultdict
@@ -7,7 +7,7 @@ import json
 import math
 from pathlib import Path
 
-from run import CPP_REFERENCE, PY_REFERENCE, REFERENCE
+from resolve_sources import UPSTREAM
 from lengths import transform_lengths, length_class, write_v4_report
 
 
@@ -58,14 +58,24 @@ def read_runner(root):
                         if row["status"] == "pass" and row.get("median_ns", 0) > 0
                         and math.isfinite(row["median_ns"])}
     print()
+    references = {}
+    for label, meta in metas.items():
+        if (meta.get("reference") and meta.get("repo", "").removesuffix(".git") ==
+                UPSTREAM.removesuffix(".git") and meta.get("requested_level") == 1
+                and meta.get("build_mode") == "fixed" and meta.get("sha")):
+            api = "C++" if meta["candidate"] == "native" else "Python"
+            if api in references:
+                raise ValueError(f"Multiple references for {api}")
+            references[api] = label
+            print(f"{api} reference: {label} @ {meta['sha']}\n")
     records = []
     for label, rows in timed.items():
         meta = metas[label]
         api = "C++" if meta["candidate"] == "native" else "Python"
-        baseline = CPP_REFERENCE if api == "C++" else PY_REFERENCE
-        ref = metas.get(baseline, {})
-        if ref.get("sha") != REFERENCE["ref"] or ref.get("requested_level") != 1:
+        baseline = references.get(api)
+        if baseline is None:
             continue
+        ref = metas[baseline]
         level = f"v{meta['requested_level']}" if meta.get("requested_level") else "native/wheel"
         package = label.removesuffix("-" + level)
         revision = meta.get("sha") or meta.get("package") or meta.get("scipy_version", "")
@@ -81,6 +91,7 @@ def read_runner(root):
                                 length_class=length_class(transform_lengths(row)),
                                 reference_mode=left, timing_mode=right,
                                 run_status=statuses[label], reference_status=statuses[baseline],
+                                reference_sha=ref["sha"], reference_label=baseline,
                                 ratio=row["median_ns"] / refrow["median_ns"]))
     if not records:
         print("No comparable timings (reference failed, unavailable, or correctness-only run).\n")
@@ -95,15 +106,16 @@ def aggregate(records, view, scope, by_isa=False):
         isa = r["level"] if by_isa else "all"
         column = r["package"] if by_isa else r["candidate"]
         key = (r["api"], isa, r["group"], r["reference_mode"], column,
-               r["revision"], r["timing_mode"])
+               r["revision"], r["timing_mode"], r.get("reference_sha", ""))
         groups[key][r["runner"]].append(r["ratio"])
         if r.get("run_status") == "fail" or r.get("reference_status") == "fail":
             flagged[key].add(r["runner"])
     result = []
     for key, runners in sorted(groups.items()):
-        api, isa, group, refmode, column, revision, timing = key
+        api, isa, group, refmode, column, revision, timing, ref_sha = key
         result.append(dict(view=view, scope=scope, api=api, isa=isa, group=group,
                            reference_mode=refmode, column=column, revision=revision,
+                           reference_sha=ref_sha,
                            timing_mode=timing, ratio=geomean([geomean(v) for v in runners.values()]),
                            cases=sum(map(len, runners.values())), runners=len(runners),
                            flagged_runners=len(flagged[key])))
@@ -113,9 +125,9 @@ def aggregate(records, view, scope, by_isa=False):
 def tables(rows):
     sections = defaultdict(list)
     for row in rows:
-        sections[(row["api"], row["isa"], row["reference_mode"])].append(row)
-    for (api, isa, refmode), section in sorted(sections.items()):
-        print(f"#### {api} / {isa} / reference: {refmode}\n")
+        sections[(row["api"], row["isa"], row["reference_mode"], row["reference_sha"])].append(row)
+    for (api, isa, refmode, ref_sha), section in sorted(sections.items()):
+        print(f"#### {api} / {isa} / reference: {refmode} @ {ref_sha[:12]}\n")
         revisions = defaultdict(set)
         for r in section:
             revisions[r["column"]].add(r["revision"])
@@ -129,7 +141,7 @@ def tables(rows):
             return name
 
         cols = sorted({column(r) for r in section},
-                      key=lambda s: (not s.startswith("ducc-0-42"), s))
+                      key=lambda s: (s not in ("ducc-py-v1", "ducc-cpp-v1", "ducc-upstream-py-v1", "ducc-upstream-cpp-v1"), s))
         groups = sorted({r["group"] for r in section})
         cells = {(r["group"], column(r)): r for r in section}
         print("| Test group | " + " | ".join(cols) + " |")
@@ -164,7 +176,7 @@ def main():
         parser.error("--output required for multiple runners")
     out.mkdir(parents=True, exist_ok=True)
     print("## FFT results\n")
-    print("Reference: DUCC 0.42.0 v1, separately for Python and C++. "
+    print("Reference: upstream DUCC ducc0 branch, fixed v1, separately for Python and C++. "
           "Candidate/reference median time; **1.000 = reference, lower is faster**. "
           "Each cell is a geometric mean of matched passing cases, followed by "
           "(case-runner pairs / contributing runners). Missing cells are not imputed. "
@@ -207,10 +219,10 @@ def main():
     write_csv(out / "normalized.csv", records,
               ["runner", "cpu", "api", "level", "package", "candidate", "revision",
                "group", "case_id", "lengths", "length_class", "reference_mode", "timing_mode", "run_status",
-               "reference_status", "ratio"])
+               "reference_status", "reference_sha", "reference_label", "ratio"])
     write_csv(out / "grouped.csv", grouped,
               ["view", "scope", "api", "isa", "group", "reference_mode", "column",
-               "revision", "timing_mode", "ratio", "cases", "runners", "flagged_runners"])
+               "revision", "timing_mode", "reference_sha", "ratio", "cases", "runners", "flagged_runners"])
 
 
 if __name__ == "__main__":

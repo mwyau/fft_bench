@@ -35,3 +35,10 @@ class TestSummary(unittest.TestCase):
         result = aggregate(rows, "cpu", "CPU")[0]
         self.assertEqual(result["flagged_runners"], 1)
         self.assertEqual(result["runners"], 2)
+
+    def test_reference_revisions_not_mixed(self):
+        row = dict(cpu="CPU", api="Python", level="v3", package="ducc-py",
+                   candidate="ducc-py-v3", group="1d", reference_mode="alloc",
+                   timing_mode="alloc", runner="a", ratio=0.5, revision="same")
+        rows = [dict(row, reference_sha="a"), dict(row, reference_sha="b")]
+        self.assertEqual(len(aggregate(rows, "cpu", "CPU")), 2)

@@ -12,7 +12,7 @@ from summarize import cpu_name, read_json, mode
 STYLES = {1: "-", 2: "--", 3: "-.", 4: ":", None: (0, (8, 3))}
 MARKERS = {1: "o", 2: "s", 3: "^", 4: "D", None: "x"}
 # Keep package colors stable across runners, including missing ISA profiles.
-COLORS = {"ducc-0-42": "#222222", "ducc": "#0072B2", "phiadaarr": "#009E73",
+COLORS = {"ducc-upstream": "#222222", "ducc": "#0072B2", "phiadaarr": "#009E73",
           "numpy": "#D55E00", "numpy-pocketfft": "#882255", "scipy": "#CC79A7", "fftw": "#E69F00",
           "admiral": "#56B4E9"}
 EXTRA_COLORS = ("#882255", "#332288", "#44AA99", "#999933", "#AA4499",

@@ -65,10 +65,10 @@ jobs:
         id: cache
         with:
           path: bundle
-          key: fft-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('resolved.json', 'toolchain.txt', 'run.py', 'cpp/**') }}
+          key: fft-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('resolved.json', 'toolchain.txt', 'run.py', 'resolve_sources.py', 'cpp/**') }}
       - name: Compile candidates
         if: steps.cache.outputs.cache-hit != 'true'
-        run: python run.py --config resolved.json --build-only bundle --output bundle/logs
+        run: python run.py --config resolved.json --resolved --build-only bundle --output bundle/logs
       - name: Package portable builds
         if: always()
         run: |

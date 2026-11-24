@@ -43,11 +43,11 @@ def geomean(values):
 def write_v4_report(out, records):
     rows = [r for r in records if r["level"] == "v4"]
     fields = ["cpu", "api", "group", "reference_mode", "candidate", "revision",
-              "timing_mode", "category", "value", "ratio", "cases", "runners",
+              "timing_mode", "reference_sha", "category", "value", "ratio", "cases", "runners",
               "worst_ratio", "worst_case", "worst_runner", "flagged_runners"]
     groups = defaultdict(list)
     for r in rows:
-        prefix = tuple(r[k] for k in fields[:7])
+        prefix = tuple(r[k] for k in fields[:8])
         for category, value in (("length", r["lengths"]), ("factorization", r["length_class"]),
                                 ("group", "all")):
             groups[prefix + (category, value)].append(r)
@@ -68,14 +68,14 @@ def write_v4_report(out, records):
         writer.writerows(results)
     sections = defaultdict(list)
     for r in results:
-        sections[tuple(r[k] for k in ("cpu", "api", "group", "reference_mode", "category"))].append(r)
-    lines = ["# v4 FFT detail", "", "Ratios to DUCC 0.42.0 v1 (lower is faster). "
+        sections[tuple(r[k] for k in ("cpu", "api", "group", "reference_mode", "reference_sha", "category"))].append(r)
+    lines = ["# v4 FFT detail", "", "Ratios to upstream DUCC ducc0 v1 (lower is faster). "
              "Lengths are transformed dimensions; batches are excluded. "
              "Cells are geometric means of matched passing cases with equal runner weight; "
              "max is the largest individual matched ratio. † denotes unexpected failures elsewhere. "
              "Coverage may differ. See v4.csv for counts, revisions and worst case IDs.", ""]
-    for (cpu, api, group, mode, cat), entries in sorted(sections.items()):
-        lines += [f"## {cpu} / {api} / {group} / {mode} / {cat}", ""]
+    for (cpu, api, group, mode, ref_sha, cat), entries in sorted(sections.items()):
+        lines += [f"## {cpu} / {api} / {group} / {mode} / {cat} / ref {ref_sha[:12]}", ""]
         cols = sorted({(r["candidate"], r["revision"], r["timing_mode"]) for r in entries})
         def label(c):
             name, rev, timing = c
