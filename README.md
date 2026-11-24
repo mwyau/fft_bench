@@ -2,7 +2,7 @@
 
 Numerical tests and timing comparisons for CPU FFT libraries through their Python and C++ APIs.
 
-Python: DUCC (x86-64 v1/v3/v4), NumPy (v2/v3/v4), SciPy. C++: DUCC (C++17 and C++23, each v1/v3/v4), FFTW, Admiral. Workload groups are defined in `cases.py`.
+Python: DUCC (x86-64 v1/v3/v4), NumPy with DUCC FFT (v2/v3/v4), upstream NumPy PocketFFT, SciPy. C++: DUCC (C++17 and C++23, each v1/v3/v4), FFTW, Admiral. Workload groups are defined in `cases.py`.
 
 ## Run
 
@@ -20,13 +20,13 @@ python plot.py results/fast
 
 Use `--check-only` to skip timings. Use separate output directories for independent runs.
 
-Edit `sources.json` or pass `--config path/to/sources.json` to choose repositories, branches, tags or commit hashes. Add multiple entries under `ducc` or `numpy` to compare forks. DUCC entries default to `ducc-python` and `ducc-cpp` (C++17); set `"candidates": ["ducc-cpp23"]` to select the C++23 build. The default C++23 entry tracks [`phiadaarr/ducc:cpp23_fft`](https://github.com/phiadaarr/ducc/tree/cpp23_fft); each run records the resolved commit SHA. An entry can set `"dispatch": true` to request a multiarch DUCC or dispatch-enabled NumPy build. The default builds use fixed ISA levels. Unsupported host ISA levels are skipped.
+Edit `sources.json` or pass `--config path/to/sources.json` to choose repositories, branches, tags or commit hashes. Add multiple entries under `ducc` or `numpy` to compare forks. DUCC entries default to `ducc-python` and `ducc-cpp` (C++17); set `"candidates": ["ducc-cpp23"]` to select the C++23 build. The default NumPy entries track [mwyau/numpy:enh/duccfft-upstream](https://github.com/mwyau/numpy/tree/enh/duccfft-upstream) for v2/v3/v4 and [numpy/numpy:main](https://github.com/numpy/numpy/tree/main) as `numpy-pocketfft` using upstream default build flags. The default C++23 entry tracks [`phiadaarr/ducc:cpp23_fft`](https://github.com/phiadaarr/ducc/tree/cpp23_fft); each run records the resolved commit SHA. An entry can set `"dispatch": true` to request a multiarch DUCC or dispatch-enabled NumPy build. The default builds use fixed ISA levels. Unsupported host ISA levels are skipped.
 
 ## GitHub Actions
 
 Pushes to `main` run the fast suite on one runner. Runs do not cancel earlier runs. For manual runs, select fast or full and set the replica array (e.g. `[1,2,3,4]`). Each runner builds and tests all selected candidates independently. AVX-512 availability depends on the assigned runner.
 
-Each runner attaches raw results, build logs, metadata, `normalized.csv`, `grouped.csv` and `summary.md`. Multiple runners also produce an `fft-summary` artifact and a combined Actions summary. Tables show test groups by candidate and ISA, per CPU model and across runners. The fixed DUCC 0.42.0 v1 reference is built for each selected API. Ratios are candidate/reference time (1.000 = reference; lower is faster), computed on matched passing cases within each runner, then geometric-averaged with equal runner weight. Cells show matched case and runner counts. Python allocation and explicit buffers are separate; FFTW and Admiral reusable-plan execution excludes plan creation. Missing or unsupported results are not imputed. Cells marked † include individually passing cases from a failed candidate or reference run; inspect the correctness counts before interpreting them.
+Each runner attaches raw results, build logs, metadata, `normalized.csv`, `grouped.csv` and `summary.md`. Multiple runners also produce an `fft-summary` artifact and a combined Actions summary. Tables show test groups by candidate and ISA, per CPU model and across runners. The fixed DUCC 0.42.0 v1 reference (`ducc-0-42-v1` for Python, `ducc-0-42-cpp-v1` for C++) is built for each selected API. Ratios are candidate/reference time (1.000 = reference; lower is faster), computed on matched passing cases within each runner, then geometric-averaged with equal runner weight. Cells show matched case and runner counts. Python allocation and explicit buffers are separate; FFTW and Admiral reusable-plan execution excludes plan creation. Missing or unsupported results are not imputed. Cells marked † include individually passing cases from a failed candidate or reference run; inspect the correctness counts before interpreting them.
 
 The `plots/` directory in each artifact contains absolute median runtime (µs/call) versus FFT length for every timed group, with separate Python and C++ panels. Colors identify packages, line styles identify ISA levels, and panels hold workload attributes fixed. Multidimensional length is the product of transformed dimensions. Cross-runner artifacts retain plots per runner; absolute runtimes are not pooled across hosts. `plots/points.csv` records exact plotted cases.
 

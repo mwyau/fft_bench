@@ -126,7 +126,7 @@ def tables(rows):
             return name
 
         cols = sorted({column(r) for r in section},
-                      key=lambda s: (not s.startswith("ducc042"), s))
+                      key=lambda s: (not s.startswith("ducc-0-42"), s))
         groups = sorted({r["group"] for r in section})
         cells = {(r["group"], column(r)): r for r in section}
         print("| Test group | " + " | ".join(cols) + " |")

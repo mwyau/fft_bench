@@ -13,13 +13,13 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parent
-KINDS = ("ducc-python", "ducc-cpp", "ducc-cpp23", "numpy", "scipy", "fftw", "admiral")
+KINDS = ("ducc-python", "ducc-cpp", "ducc-cpp23", "numpy", "numpy-pocketfft", "scipy", "fftw", "admiral")
 DUCC_CPP_STANDARDS = {"ducc-cpp": 17, "ducc-cpp23": 23}
 # ducc0_0_42_0, pinned independently of the candidate configuration.
-REFERENCE = dict(name="ducc042", repo="https://github.com/mreineck/ducc.git",
+REFERENCE = dict(name="ducc-0-42", repo="https://github.com/mreineck/ducc.git",
                  ref="42ce8ab5c5d79e0e2fd9af4a09c2ea4693520e1b")
-PY_REFERENCE = "ducc042-py-v1"
-CPP_REFERENCE = "ducc042-cpp-v1"
+PY_REFERENCE = "ducc-0-42-v1"
+CPP_REFERENCE = "ducc-0-42-cpp-v1"
 
 
 def command(args, log, *, env=None, cwd=None):
@@ -83,6 +83,12 @@ def build_python(kind, spec, src, level, work, config, log, jobs):
         env.pop("CXXFLAGS", None)
         args = [f"-Ccmake.define.DUCC0_ARCH_FLAGS=-march={arch(level)}",
                 "-Ccmake.define.CMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                f"-Cbuild-dir={work / 'build'}"]
+    elif level is None:
+        # Upstream PocketFFT control: default NumPy compiler/dispatch settings.
+        env.pop("CFLAGS", None)
+        env.pop("CXXFLAGS", None)
+        args = ["-Csetup-args=-Dallow-noblas=true", f"-Ccompile-args=-j{jobs}",
                 f"-Cbuild-dir={work / 'build'}"]
     else:
         env.update(CFLAGS=f"-march={arch(level)}", CXXFLAGS=f"-march={arch(level)}")
@@ -181,15 +187,15 @@ def main():
 
     base = venv(work / "reference", config, out / "reference.log")
     # References are mandatory for the selected APIs, even with --only.
-    need_python = bool(selected & {"ducc-python", "numpy", "scipy"})
+    need_python = bool(selected & {"ducc-python", "numpy", "numpy-pocketfft", "scipy"})
     need_cpp = bool(selected & {"ducc-cpp", "ducc-cpp23", "fftw", "admiral"})
-    ref_src = work / "ducc042"
+    ref_src = work / "ducc-0-42"
     ref_sha = None
     if need_python or need_cpp:
         try:
-            ref_sha = checkout(REFERENCE, ref_src, out / "ducc042-checkout.log")
+            ref_sha = checkout(REFERENCE, ref_src, out / "ducc-0-42-checkout.log")
         except Exception as exc:
-            record("ducc042-checkout", "fail", str(exc))
+            record("ducc-0-42-checkout", "fail", str(exc))
 
     ref_meta = dict(repo=REFERENCE["repo"], ref=REFERENCE["ref"], sha=ref_sha,
                     backend="ducc", architecture="x86-64", requested_level=1,
@@ -223,7 +229,7 @@ def main():
         attempt("fftw", fftw)
 
     for kind in ("ducc", "numpy", "admiral"):
-        relevant = {"ducc": {"ducc-python", *DUCC_CPP_STANDARDS}, "numpy": {"numpy"},
+        relevant = {"ducc": {"ducc-python", *DUCC_CPP_STANDARDS}, "numpy": {"numpy", "numpy-pocketfft"},
                     "admiral": {"admiral"}}[kind]
         if not relevant & selected:
             continue
@@ -252,6 +258,20 @@ def main():
                     execute(name, base, "native", dict(origin, architecture="native"), executable=exe)
                 attempt(name, admiral)
                 continue
+            if kind == "numpy" and "numpy-pocketfft" in enabled:
+                def pocketfft():
+                    label = name if "numpy" not in candidates else name + "-pocketfft"
+                    folder = work / label
+                    folder.mkdir()
+                    py, wheel = build_python(kind, spec, src, None, folder, config,
+                                             out / (label + ".log"), args.jobs)
+                    execute(label, py, "numpy", dict(origin, architecture="upstream-default",
+                            build_mode="upstream-default", wheel=wheel,
+                            expected_fft_backend="pocketfft"))
+                label = name if "numpy" not in candidates else name + "-pocketfft"
+                attempt(label, pocketfft)
+                if "numpy" not in enabled:
+                    continue
             targets = (1, 3, 4) if kind == "ducc" else (2, 3, 4)
             py_selected = "ducc-python" in enabled if kind == "ducc" else "numpy" in enabled
             dispatch_build = spec.get("dispatch", False)
@@ -283,6 +303,8 @@ def main():
                                 py, wheel = build_python(kind, spec, src, level, folder, config, log, args.jobs)
                             meta = dict(origin, architecture=arch(level), requested_level=level,
                                         build_mode="dispatch" if dispatch_build else "fixed", wheel=wheel)
+                            if kind == "numpy":
+                                meta["expected_fft_backend"] = spec.get("fft_backend", "duccfft")
                             env = dict(os.environ)
                             env.pop("DUCC0_MAX_PSABI_LEVEL", None)
                             env.pop("NPY_DISABLE_CPU_FEATURES", None)

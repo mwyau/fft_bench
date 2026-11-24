@@ -247,9 +247,12 @@ def environment(candidate):
     if candidate == "numpy":
         try:
             from numpy.fft import _duccfft_umath as m
+            data["fft_backend"] = "duccfft"
             data["fft_target"] = getattr(m, "__duccfft_cpu_dispatch_target__", None)
             data["fft_targets"] = getattr(m, "__duccfft_cpu_dispatch_targets__", None)
         except ImportError:
+            from numpy.fft import _pocketfft_umath  # verify the actual extension exists
+            data["fft_backend"] = "pocketfft"
             data["fft_target"] = "PocketFFT"
         from numpy._core import _multiarray_umath as m
         data["numpy_cpu_baseline"] = list(m.__cpu_baseline__)
@@ -292,6 +295,9 @@ def main():
     meta.update(environment(args.candidate))
     meta.update(candidate=args.candidate, label=args.label or args.candidate, suite=args.suite)
     args.output.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    expected_backend = meta.get("expected_fft_backend")
+    if expected_backend and meta.get("fft_backend") != expected_backend:
+        raise RuntimeError(f"Expected FFT backend {expected_backend}, got {meta.get('fft_backend')}")
     if meta.get("build_mode") == "dispatch":
         level = meta["requested_level"]
         if args.candidate == "ducc0" and meta.get("psabi_level") != level:

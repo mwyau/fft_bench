@@ -21,7 +21,7 @@ on:
       only:
         description: Comma-separated candidates
         type: string
-        default: ducc-python,ducc-cpp,ducc-cpp23,numpy,scipy,fftw,admiral
+        default: ducc-python,ducc-cpp,ducc-cpp23,numpy,numpy-pocketfft,scipy,fftw,admiral
       check_only:
         description: Skip timings
         type: boolean
@@ -69,7 +69,7 @@ jobs:
         env:
           SOURCE_CONFIG: ${{ inputs.config }}
           SUITE: ${{ inputs.suite || 'fast' }}
-          ONLY: ${{ inputs.only || 'ducc-python,ducc-cpp,ducc-cpp23,numpy,scipy,fftw,admiral' }}
+          ONLY: ${{ inputs.only || 'ducc-python,ducc-cpp,ducc-cpp23,numpy,numpy-pocketfft,scipy,fftw,admiral' }}
           CHECK_ONLY: ${{ inputs.check_only }}
           PLANNING: ${{ inputs.planning || 'estimate' }}
         run: |

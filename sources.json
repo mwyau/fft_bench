@@ -19,8 +19,18 @@
   "numpy": [
     {
       "name": "numpy",
+      "repo": "https://github.com/mwyau/numpy.git",
+      "ref": "enh/duccfft-upstream",
+      "fft_backend": "duccfft"
+    },
+    {
+      "name": "numpy-pocketfft",
       "repo": "https://github.com/numpy/numpy.git",
-      "ref": "5969d7ba7f823e83a8702bcc2f85af4e1fd78bd4"
+      "ref": "main",
+      "fft_backend": "pocketfft",
+      "candidates": [
+        "numpy-pocketfft"
+      ]
     }
   ],
   "admiral": [
