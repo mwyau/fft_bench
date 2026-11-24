@@ -13,7 +13,7 @@ class Case:
     precision: str
     layout: str = "C"
     threads: int = 1
-    mode: str = "out"
+    mode: str = "default"
     norm: str = "backward"
     transform_type: int = 2
     lengths: tuple = ()
@@ -35,7 +35,7 @@ def cases(suite):
     rows = []
 
     def add(group, shapes, kinds, *, precisions=("f32", "f64"),
-            axes=None, layouts=("C",), threads=(1,), modes=("out",),
+            axes=None, layouts=("C",), threads=(1,), modes=("default",),
             norm="backward", types=(2,), lengths=(), check_only=False):
         for shape, kind, p, layout, t, mode, ty in product(
                 shapes, kinds, precisions, layouts, threads, modes, types):
@@ -96,9 +96,9 @@ def cases(suite):
     add("threads", [(64, 4096), (8, 65536)], ("fft", "rfft"), axes=(1,), threads=(4,))
     add("threads", [(64, 128, 128), (262144,)], complex_ops + real_ops, threads=(4,))
 
-    add("buffers", [(64, 4095), (64, 4096)], ("fft", "rfft", "irfft"), axes=(1,), modes=("alloc",))
+    add("buffers", [(64, 4095), (64, 4096)], ("fft", "rfft", "irfft"), axes=(1,), modes=("out",))
     add("buffers", [(1024,), (64, 4096)], complex_ops, axes=(-1,), modes=("inplace",))
-    add("buffers", [(128, 256)], ("fft", "rfft"), modes=("alloc",))
+    add("buffers", [(128, 256)], ("fft", "rfft"), modes=("out",))
     for norm in ("forward", "ortho"):
         add("normalization", [(257,), (16, 17)], complex_ops + real_ops, norm=norm, check_only=True)
     for n in (1000, 1031):
