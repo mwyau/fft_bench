@@ -23,3 +23,15 @@ class TestSummary(unittest.TestCase):
                    timing_mode="alloc", runner="a", ratio=0.5)
         self.assertEqual(len(aggregate([dict(row, revision="a"), dict(row, revision="b")],
                                        "cpu", "CPU")), 2)
+
+    def test_flagged_runs(self):
+        row = dict(cpu="CPU", api="Python", level="v3", package="ducc-py",
+                   candidate="ducc-py-v3", revision="sha", group="1d",
+                   reference_mode="alloc", timing_mode="alloc", ratio=0.5,
+                   run_status="pass")
+        rows = [dict(row, runner="a", reference_status="fail"),
+                dict(row, runner="a", reference_status="fail"),
+                dict(row, runner="b", reference_status="pass")]
+        result = aggregate(rows, "cpu", "CPU")[0]
+        self.assertEqual(result["flagged_runners"], 1)
+        self.assertEqual(result["runners"], 2)

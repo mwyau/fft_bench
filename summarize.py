@@ -39,20 +39,20 @@ def read_runner(root):
     print("Usable ISA:", ", ".join(f"v{v}" for v in sorted(host.get("usable_levels", []))), "\n")
     print("| Candidate | Run | Passed | Skipped | Failed |")
     print("|---|---|---:|---:|---:|")
-    timed, metas = {}, {}
+    timed, metas, statuses = {}, {}, {}
     for run in runs:
         label = run["label"]
         path = root / (label + ".jsonl")
         rows = [json.loads(line) for line in path.read_text().splitlines() if line] if path.is_file() else []
         counts = [sum(row["status"] == s for row in rows) for s in ("pass", "skip", "fail")]
         print(f"| {label} | {run['status']} | {counts[0]} | {counts[1]} | {counts[2]} |")
-        if run["status"] != "pass":
-            # A failed candidate is not a valid performance comparison.
+        if run["status"] not in ("pass", "fail"):
             continue
         meta = read_json(path.with_suffix(".meta.json"), {})
         if not meta:
             continue
         metas[label] = meta
+        statuses[label] = run["status"]
         timed[label] = {row["case_id"]: row for row in rows
                         if row["status"] == "pass" and row.get("median_ns", 0) > 0
                         and math.isfinite(row["median_ns"])}
@@ -77,6 +77,7 @@ def read_runner(root):
                                 package=package, candidate=label, revision=revision,
                                 group=row["group"], case_id=case_id,
                                 reference_mode=left, timing_mode=right,
+                                run_status=statuses[label], reference_status=statuses[baseline],
                                 ratio=row["median_ns"] / refrow["median_ns"]))
     if not records:
         print("No comparable timings (reference failed, unavailable, or correctness-only run).\n")
@@ -86,19 +87,23 @@ def read_runner(root):
 def aggregate(records, view, scope, by_isa=False):
     # Equal weight per runner after matching case IDs within that runner.
     groups = defaultdict(lambda: defaultdict(list))
+    flagged = defaultdict(set)
     for r in records:
         isa = r["level"] if by_isa else "all"
         column = r["package"] if by_isa else r["candidate"]
         key = (r["api"], isa, r["group"], r["reference_mode"], column,
                r["revision"], r["timing_mode"])
         groups[key][r["runner"]].append(r["ratio"])
+        if r.get("run_status") == "fail" or r.get("reference_status") == "fail":
+            flagged[key].add(r["runner"])
     result = []
     for key, runners in sorted(groups.items()):
         api, isa, group, refmode, column, revision, timing = key
         result.append(dict(view=view, scope=scope, api=api, isa=isa, group=group,
                            reference_mode=refmode, column=column, revision=revision,
                            timing_mode=timing, ratio=geomean([geomean(v) for v in runners.values()]),
-                           cases=sum(map(len, runners.values())), runners=len(runners)))
+                           cases=sum(map(len, runners.values())), runners=len(runners),
+                           flagged_runners=len(flagged[key])))
     return result
 
 
@@ -130,7 +135,11 @@ def tables(rows):
             values = []
             for col in cols:
                 r = cells.get((group, col))
-                values.append(f"{r['ratio']:.3f} ({r['cases']}/{r['runners']})" if r else "—")
+                if r:
+                    flag = " †" if r["flagged_runners"] else ""
+                    values.append(f"{r['ratio']:.3f} ({r['cases']}/{r['runners']}){flag}")
+                else:
+                    values.append("—")
             print("| " + group + " | " + " | ".join(values) + " |")
         print()
 
@@ -156,16 +165,20 @@ def main():
           "Candidate/reference median time; **1.000 = reference, lower is faster**. "
           "Each cell is a geometric mean of matched passing cases, followed by "
           "(case-runner pairs / contributing runners). Missing cells are not imputed. "
-          "Candidate case coverage can differ. Native reusable-plan timings exclude planning.\n")
+          "Candidate case coverage can differ. † At least one contributing runner had a "
+          "failed candidate or reference run; only individually passing cases contribute. "
+          "Native reusable-plan timings exclude planning.\n")
     records = []
     grouped = []
     for root in args.roots:
         rows = read_runner(root)
         records.extend(rows)
         if rows:
-            print("#### Per-runner comparison\n")
             result = aggregate(rows, "runner", root.name)
-            tables(result)
+            # Individual job summaries already show per-runner timing tables.
+            if len(args.roots) == 1:
+                print("#### Per-runner comparison\n")
+                tables(result)
             grouped.extend(result)
     if records:
         print("## Per CPU model\n")
@@ -178,7 +191,7 @@ def main():
         print("## Per ISA level\n")
         print("Only fixed or requested ISA profiles are assigned v1–v4. "
               "System libraries, wheels and native builds appear separately.\n")
-        for cpu in cpus + ["All CPUs"]:
+        for cpu in cpus + (["All CPUs"] if len(cpus) > 1 else []):
             print(f"### {cpu}\n")
             rows = records if cpu == "All CPUs" else [r for r in records if r["cpu"] == cpu]
             result = aggregate(rows, "isa", cpu, by_isa=True)
@@ -186,10 +199,11 @@ def main():
             grouped.extend(result)
     write_csv(out / "normalized.csv", records,
               ["runner", "cpu", "api", "level", "package", "candidate", "revision",
-               "group", "case_id", "reference_mode", "timing_mode", "ratio"])
+               "group", "case_id", "reference_mode", "timing_mode", "run_status",
+               "reference_status", "ratio"])
     write_csv(out / "grouped.csv", grouped,
               ["view", "scope", "api", "isa", "group", "reference_mode", "column",
-               "revision", "timing_mode", "ratio", "cases", "runners"])
+               "revision", "timing_mode", "ratio", "cases", "runners", "flagged_runners"])
 
 
 if __name__ == "__main__":
