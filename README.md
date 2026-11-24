@@ -22,8 +22,8 @@ Edit `sources.json` or pass `--config path/to/sources.json` to choose repositori
 
 ## GitHub Actions
 
-Pushes to `main` run the fast suite on one runner. For manual runs, select fast or full and set the replica array (e.g. `[1,2,3,4]`). Each runner builds and tests all selected candidates independently. AVX-512 availability depends on the assigned runner.
+Pushes to `main` run the fast suite on one runner. Runs do not cancel earlier runs. For manual runs, select fast or full and set the replica array (e.g. `[1,2,3,4]`). Each runner builds and tests all selected candidates independently. AVX-512 availability depends on the assigned runner.
 
-The results artifact contains per-case JSONL files, build logs, CPU and build information, and `grouped.csv` with matched case comparisons. Compare timings on the same runner. Python allocation and explicit output-buffer timings are separate. FFTW and Admiral plan execution excludes plan creation; DUCC native calls use the FFT API directly. Unsupported cases have explicit skip reasons.
+Each runner attaches raw results, build logs, metadata, `normalized.csv`, `grouped.csv` and `summary.md`. Multiple runners also produce an `fft-summary` artifact and a combined Actions summary. Tables show test groups by candidate and ISA, per CPU model and across runners. The fixed DUCC 0.42.0 v1 reference is built for each selected API. Ratios are candidate/reference time (1.000 = reference; lower is faster), computed on matched passing cases within each runner, then geometric-averaged with equal runner weight. Cells show matched case and runner counts. Python allocation and explicit buffers are separate; FFTW and Admiral reusable-plan execution excludes plan creation. Missing or unsupported results are not imputed.
 
 The first version targets Linux x86-64. See [AGENTS.md](AGENTS.md) for development conventions.

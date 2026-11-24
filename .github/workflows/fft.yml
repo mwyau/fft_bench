@@ -35,10 +35,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: fft-${{ github.event_name == 'push' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
-
 jobs:
   benchmark:
     name: FFT runner ${{ matrix.replica }}
@@ -67,8 +63,8 @@ jobs:
           sudo apt-get install -y gcc-14 g++-14 ninja-build libfftw3-dev
       - name: Check workload definitions
         run: |
-          python -m compileall -q cases.py reference.py bench.py run.py
-          python -m unittest test_cases -v
+          python -m compileall -q cases.py reference.py bench.py run.py summarize.py
+          python -m unittest discover -v
       - name: Build and compare candidates
         env:
           SOURCE_CONFIG: ${{ inputs.config }}
@@ -90,11 +86,38 @@ jobs:
         if: always()
         run: |
           if [[ -f results/runs.json ]]; then
-            python summarize.py results >> "$GITHUB_STEP_SUMMARY"
+            python summarize.py results | tee results/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: fft-runner-${{ matrix.replica }}
           path: results/
+          if-no-files-found: warn
+
+  summary:
+    name: Cross-runner summary
+    needs: benchmark
+    if: ${{ always() && !cancelled() && fromJSON(inputs.replicas || '[1]')[1] != null }}
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fft-runner-*
+          path: runners
+      - name: Combine runner results
+        run: |
+          mkdir -p combined
+          python summarize.py runners/fft-runner-* --output combined | tee combined/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fft-summary
+          path: combined/
           if-no-files-found: warn

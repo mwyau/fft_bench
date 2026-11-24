@@ -15,6 +15,11 @@ import tempfile
 ROOT = Path(__file__).resolve().parent
 KINDS = ("ducc-python", "ducc-cpp", "ducc-cpp23", "numpy", "scipy", "fftw", "admiral")
 DUCC_CPP_STANDARDS = {"ducc-cpp": 17, "ducc-cpp23": 23}
+# ducc0_0_42_0, pinned independently of the candidate configuration.
+REFERENCE = dict(name="ducc042", repo="https://github.com/mreineck/ducc.git",
+                 ref="42ce8ab5c5d79e0e2fd9af4a09c2ea4693520e1b")
+PY_REFERENCE = "ducc042-py-v1"
+CPP_REFERENCE = "ducc042-cpp-v1"
 
 
 def command(args, log, *, env=None, cwd=None):
@@ -127,7 +132,7 @@ def main():
         p.error("invalid --only or --jobs")
     config = json.loads(args.config.read_text())
     names = [s["name"] for k in ("ducc", "numpy", "admiral") for s in config.get(k, [])]
-    if len(names) != len(set(names)) or set(names) & {"scipy", "fftw", "reference"}:
+    if len(names) != len(set(names)) or set(names) & {"scipy", "fftw", "reference", REFERENCE["name"]}:
         p.error("source names must be distinct and not reserved")
     out = args.output.resolve()
     if out.exists() and any(out.iterdir()):
@@ -143,6 +148,7 @@ def main():
     (out / "host.json").write_text(json.dumps(host, indent=2) + "\n")
     (out / "sources.json").write_text(json.dumps(config, indent=2) + "\n")
     runs = []
+    (out / "runs.json").write_text("[]\n")
 
     def record(label, status, reason=""):
         runs.append(dict(label=label, status=status, reason=reason))
@@ -174,6 +180,36 @@ def main():
             record(label, "fail", str(exc))
 
     base = venv(work / "reference", config, out / "reference.log")
+    # References are mandatory for the selected APIs, even with --only.
+    need_python = bool(selected & {"ducc-python", "numpy", "scipy"})
+    need_cpp = bool(selected & {"ducc-cpp", "ducc-cpp23", "fftw", "admiral"})
+    ref_src = work / "ducc042"
+    ref_sha = None
+    if need_python or need_cpp:
+        try:
+            ref_sha = checkout(REFERENCE, ref_src, out / "ducc042-checkout.log")
+        except Exception as exc:
+            record("ducc042-checkout", "fail", str(exc))
+
+    ref_meta = dict(repo=REFERENCE["repo"], ref=REFERENCE["ref"], sha=ref_sha,
+                    backend="ducc", architecture="x86-64", requested_level=1,
+                    build_mode="fixed", reference=True, release="0.42.0")
+    if need_python and ref_sha:
+        def python_reference():
+            folder = work / PY_REFERENCE
+            folder.mkdir()
+            py, wheel = build_python("ducc", REFERENCE, ref_src, 1, folder, config,
+                                     out / (PY_REFERENCE + ".log"), args.jobs)
+            execute(PY_REFERENCE, py, "ducc0", dict(ref_meta, wheel=wheel))
+        attempt(PY_REFERENCE, python_reference)
+    if need_cpp and ref_sha:
+        def cpp_reference():
+            exe = build_native("ducc", ref_src, "x86-64", work / CPP_REFERENCE,
+                               out / (CPP_REFERENCE + ".log"), args.jobs)
+            execute(CPP_REFERENCE, base, "native", dict(ref_meta, cxx_standard=17),
+                    executable=exe)
+        attempt(CPP_REFERENCE, cpp_reference)
+
     if "scipy" in selected:
         attempt("scipy", lambda: execute("scipy", base, "scipy",
                                         dict(backend="scipy", package=config["scipy"])))
