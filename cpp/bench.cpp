@@ -16,6 +16,13 @@
 
 #if defined(BENCH_DUCC)
 #include "ducc0/fft/fft.h"
+#if BENCH_DUCC_CXX_STANDARD == 17
+static_assert(__cplusplus == 201703L, "Expected C++17");
+#elif BENCH_DUCC_CXX_STANDARD == 23
+static_assert(__cplusplus >= 202100L && __cplusplus <= 202302L, "Expected C++23");
+#else
+#error Unsupported DUCC C++ standard
+#endif
 #elif defined(BENCH_FFTW)
 #include <fftw3.h>
 #elif defined(BENCH_ADMIRAL)

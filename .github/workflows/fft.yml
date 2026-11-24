@@ -21,7 +21,7 @@ on:
       only:
         description: Comma-separated candidates
         type: string
-        default: ducc-python,ducc-cpp,numpy,scipy,fftw,admiral
+        default: ducc-python,ducc-cpp,ducc-cpp23,numpy,scipy,fftw,admiral
       check_only:
         description: Skip timings
         type: boolean
@@ -42,7 +42,7 @@ concurrency:
 jobs:
   benchmark:
     name: FFT runner ${{ matrix.replica }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -73,7 +73,7 @@ jobs:
         env:
           SOURCE_CONFIG: ${{ inputs.config }}
           SUITE: ${{ inputs.suite || 'fast' }}
-          ONLY: ${{ inputs.only || 'ducc-python,ducc-cpp,numpy,scipy,fftw,admiral' }}
+          ONLY: ${{ inputs.only || 'ducc-python,ducc-cpp,ducc-cpp23,numpy,scipy,fftw,admiral' }}
           CHECK_ONLY: ${{ inputs.check_only }}
           PLANNING: ${{ inputs.planning || 'estimate' }}
         run: |

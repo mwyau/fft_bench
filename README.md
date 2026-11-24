@@ -2,16 +2,17 @@
 
 Numerical tests and timing comparisons for CPU FFT libraries through their Python and C++ APIs.
 
-Python: DUCC (x86-64 v1/v3/v4), NumPy (v2/v3/v4), SciPy. C++: DUCC (v1/v3/v4), FFTW, Admiral. Workload groups are defined in `cases.py`.
+Python: DUCC (x86-64 v1/v3/v4), NumPy (v2/v3/v4), SciPy. C++: DUCC (C++17 and C++23, each v1/v3/v4), FFTW, Admiral. Workload groups are defined in `cases.py`.
 
 ## Run
 
-Linux x86-64, Python 3.13, Git, GCC, CMake, Ninja and the FFTW development libraries are required. GCC 14 is used in CI.
+Linux x86-64, Python 3.13, Git, GCC, CMake, Ninja and the FFTW development libraries are required. CI uses Ubuntu 26.04 and GCC 14.
 
 ```sh
 python run.py --suite fast --output results/fast
 python run.py --suite full --output results/full
 python run.py --only ducc-python,numpy --group batched --output results/batched
+python run.py --only ducc-cpp,ducc-cpp23 --output results/ducc-cpp
 python summarize.py results/fast
 ```
 

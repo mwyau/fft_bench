@@ -8,6 +8,7 @@ Follow [write-like-a-scientist](https://github.com/mwyau/write-like-a-scientist)
 - Record repository URL, resolved SHA, compiler and flags, CPU model and features, actual selected FFT target when exposed, thread count, dtype, layout, axes, samples and errors.
 - Compare timings only within the same runner. Do not treat missing AVX-512 support as a successful v4 test. Build and runtime dispatch settings are different; record both. Use separate processes for dispatch overrides.
 - Use x86-64-v1/v3/v4 for DUCC and v2/v3/v4 for NumPy. Check host and OS ISA support before loading a target-specific binary. Never silently fall back and label the result as a higher ISA.
+- Build DUCC C++17 and C++23 from the same source revision with identical compiler and ISA flags apart from the language standard. Record the standard in each build's metadata.
 - Fast is a subset of full. Test tiny and empty transforms for correctness; time small transforms separately as API overhead. Use realistic batched lengths and bounded memory for throughput. Cover odd/even, prime, mixed radix, SIMD tails, cache boundaries, strides, axes and multidimensional transforms.
 - Unsupported API capabilities get explicit skip reasons. Unexpected exceptions, incorrect results and wrong ISA selections fail the run. Save results even when some cases fail.
 - Keep source checkouts and generated builds/results out of Git. Do not modify candidate repositories. Do not push to candidate forks or upstream repositories.

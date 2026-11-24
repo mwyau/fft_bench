@@ -13,7 +13,8 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parent
-KINDS = ("ducc-python", "ducc-cpp", "numpy", "scipy", "fftw", "admiral")
+KINDS = ("ducc-python", "ducc-cpp", "ducc-cpp23", "numpy", "scipy", "fftw", "admiral")
+DUCC_CPP_STANDARDS = {"ducc-cpp": 17, "ducc-cpp23": 23}
 
 
 def command(args, log, *, env=None, cwd=None):
@@ -96,10 +97,10 @@ def build_python(kind, spec, src, level, work, config, log, jobs):
     return py, wheels[0].name
 
 
-def build_native(kind, src, target, work, log, jobs):
+def build_native(kind, src, target, work, log, jobs, *, cxx_standard=17):
     args = [f"-DBENCH_BACKEND={kind}", f"-DBENCH_ARCH={target}"]
     if kind == "ducc":
-        args.append(f"-DDUCC_SOURCE={src}")
+        args += [f"-DDUCC_SOURCE={src}", f"-DDUCC_CXX_STANDARD={cxx_standard}"]
     elif kind == "admiral":
         args.append(f"-DADMIRAL_SOURCE={src}")
     command(["cmake", "-S", ROOT / "cpp", "-B", work, "-G", "Ninja",
@@ -186,7 +187,7 @@ def main():
         attempt("fftw", fftw)
 
     for kind in ("ducc", "numpy", "admiral"):
-        relevant = {"ducc": {"ducc-python", "ducc-cpp"}, "numpy": {"numpy"},
+        relevant = {"ducc": {"ducc-python", *DUCC_CPP_STANDARDS}, "numpy": {"numpy"},
                     "admiral": {"admiral"}}[kind]
         if not relevant & selected:
             continue
@@ -250,16 +251,24 @@ def main():
                                         f"X86_V{v}" for v in targets if v > level)
                             execute(label, py, "ducc0" if kind == "ducc" else "numpy", meta, env=env)
                         attempt(prefix, python_profile)
-                if kind == "ducc" and "ducc-cpp" in selected:
-                    label = name + f"-cpp-v{level}"
-                    if level not in levels:
-                        record(label, "skip", "host/OS does not support requested ISA")
-                    else:
+                if kind == "ducc":
+                    for candidate, standard in DUCC_CPP_STANDARDS.items():
+                        if candidate not in selected:
+                            continue
+                        suffix = "cpp" if standard == 17 else f"cpp{standard}"
+                        label = name + f"-{suffix}-v{level}"
+                        if level not in levels:
+                            record(label, "skip", "host/OS does not support requested ISA")
+                            continue
+
                         def ducc_cpp():
                             exe = build_native(kind, src, arch(level), work / label,
-                                               out / (label + ".log"), args.jobs)
+                                               out / (label + ".log"), args.jobs,
+                                               cxx_standard=standard)
                             execute(label, base, "native", dict(origin, architecture=arch(level),
-                                    requested_level=level, build_mode="fixed"), executable=exe)
+                                    requested_level=level, build_mode="fixed",
+                                    cxx_standard=standard), executable=exe)
+
                         attempt(label, ducc_cpp)
 
     return int(not runs or any(r["status"] == "fail" for r in runs)
