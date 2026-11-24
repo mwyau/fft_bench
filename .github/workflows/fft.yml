@@ -1,0 +1,96 @@
+name: FFT tests and benchmarks
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Workload suite
+        type: choice
+        options: [fast, full]
+        default: fast
+      replicas:
+        description: 'Runner IDs as a JSON array, e.g. [1,2,3,4]'
+        type: string
+        default: '[1]'
+      config:
+        description: 'Optional sources.json replacement (JSON)'
+        type: string
+        default: ''
+      only:
+        description: Comma-separated candidates
+        type: string
+        default: ducc-python,ducc-cpp,numpy,scipy,fftw,admiral
+      check_only:
+        description: Skip timings
+        type: boolean
+        default: false
+      planning:
+        description: Native FFTW and Admiral planning effort
+        type: choice
+        options: [estimate, measure]
+        default: estimate
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: FFT runner ${{ matrix.replica }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: ${{ fromJSON(inputs.replicas || '[1]') }}
+    env:
+      CC: gcc-14
+      CXX: g++-14
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 ninja-build libfftw3-dev
+      - name: Check workload definitions
+        run: |
+          python -m compileall -q cases.py reference.py bench.py run.py
+          python -m unittest test_cases -v
+      - name: Build and compare candidates
+        env:
+          SOURCE_CONFIG: ${{ inputs.config }}
+          SUITE: ${{ inputs.suite || 'fast' }}
+          ONLY: ${{ inputs.only || 'ducc-python,ducc-cpp,numpy,scipy,fftw,admiral' }}
+          CHECK_ONLY: ${{ inputs.check_only }}
+          PLANNING: ${{ inputs.planning || 'estimate' }}
+        run: |
+          config=sources.json
+          if [[ -n "$SOURCE_CONFIG" ]]; then
+            config="$RUNNER_TEMP/sources.json"
+            printf '%s\n' "$SOURCE_CONFIG" > "$config"
+          fi
+          extra=()
+          if [[ "$CHECK_ONLY" == "true" ]]; then extra+=(--check-only); fi
+          python run.py --suite "$SUITE" --config "$config" --only "$ONLY" \
+            --planning "$PLANNING" "${extra[@]}"
+      - name: Summarize results
+        if: always()
+        run: |
+          if [[ -f results/runs.json ]]; then
+            python summarize.py results >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fft-runner-${{ matrix.replica }}
+          path: results/
+          if-no-files-found: warn
