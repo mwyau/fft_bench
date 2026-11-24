@@ -2,7 +2,7 @@
 
 Numerical tests and timing comparisons for CPU FFT libraries through their Python and C++ APIs.
 
-Python: DUCC (x86-64 v1/v3/v4), NumPy with DUCC FFT (v2/v3/v4), upstream NumPy PocketFFT, SciPy. C++: DUCC (C++17 and C++23, each v1/v3/v4), FFTW, Admiral. Workload groups are defined in `cases.py`.
+Python: upstream DUCC and DUCC SIMD fork (x86-64 v1/v3/v4), NumPy with the synchronized DUCC FFT port (v2/v3/v4), upstream NumPy PocketFFT, SciPy. C++: upstream DUCC, DUCC SIMD fork and C++23 FFT (each v1/v3/v4), FFTW, Admiral. Workload groups are defined in `cases.py`.
 
 ## Run
 
@@ -20,7 +20,7 @@ python plot.py results/fast
 
 Use `--check-only` to skip timings. Use separate output directories for independent runs.
 
-Edit `sources.json` or pass `--config path/to/sources.json` to choose repositories, branches, tags or commit hashes. Add multiple entries under `ducc` or `numpy` to compare forks. DUCC entries default to `ducc-python` and `ducc-cpp` (C++17); set `"candidates": ["ducc-cpp23"]` to select the C++23 build. The default NumPy entries track [mwyau/numpy:enh/duccfft-upstream](https://github.com/mwyau/numpy/tree/enh/duccfft-upstream) for v2/v3/v4 and [numpy/numpy:main](https://github.com/numpy/numpy/tree/main) as `numpy-pocketfft` using upstream default build flags. The default C++23 entry tracks [`phiadaarr/ducc:cpp23_fft`](https://github.com/phiadaarr/ducc/tree/cpp23_fft); each run records the resolved commit SHA. An entry can set `"dispatch": true` to request a multiarch DUCC or dispatch-enabled NumPy build. The default builds use fixed ISA levels. Unsupported host ISA levels are skipped.
+Edit `sources.json` or pass `--config path/to/sources.json` to choose repositories, branches, tags or commit hashes. Add multiple entries under `ducc` or `numpy` to compare forks. DUCC entries default to `ducc-python` and `ducc-cpp` (C++17); set `"candidates": ["ducc-cpp23"]` to select the C++23 build. The SIMD fork uses [mwyau/ducc:fft-simd-improvements](https://github.com/mwyau/ducc/tree/fft-simd-improvements) at `f80b987`. NumPy v2/v3/v4 use the [synchronized NumPy port](https://github.com/mwyau/numpy/tree/enh/duccfft-simd-improvements) at `b7053b3`. These two revisions are pinned together so the tested FFT kernels remain identical. Upstream [numpy/numpy:main](https://github.com/numpy/numpy/tree/main) supplies `numpy-pocketfft` using default build flags. The default C++23 entry tracks [`phiadaarr/ducc:cpp23_fft`](https://github.com/phiadaarr/ducc/tree/cpp23_fft); each run records the resolved commit SHA. An entry can set `"dispatch": true` to request a multiarch DUCC or dispatch-enabled NumPy build. The default builds use fixed ISA levels. Unsupported host ISA levels are skipped.
 
 ## GitHub Actions
 

@@ -8,6 +8,12 @@
       "ref": "ducc0"
     },
     {
+      "name": "ducc-simd",
+      "repo": "https://github.com/mwyau/ducc.git",
+      "ref": "f80b987891bd34d367c414dc2f27a13e42f4cb94",
+      "source_ref": "fft-simd-improvements"
+    },
+    {
       "name": "phiadaarr",
       "repo": "https://github.com/phiadaarr/ducc.git",
       "ref": "cpp23_fft",
@@ -20,8 +26,9 @@
     {
       "name": "numpy",
       "repo": "https://github.com/mwyau/numpy.git",
-      "ref": "enh/duccfft-upstream",
-      "fft_backend": "duccfft"
+      "ref": "b7053b3dc6cd0631b6a1d4445750cd5423eb09b5",
+      "fft_backend": "duccfft",
+      "source_ref": "enh/duccfft-simd-improvements"
     },
     {
       "name": "numpy-pocketfft",
