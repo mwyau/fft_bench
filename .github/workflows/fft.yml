@@ -10,40 +10,86 @@ on:
         type: choice
         options: [fast, full]
         default: fast
-      replicas:
-        description: 'Runner IDs as a JSON array, e.g. [1,2,3,4]'
-        type: string
-        default: '[1]'
+      runners:
+        description: Number of independent benchmark runners (1–40)
+        type: number
+        default: 1
       config:
-        description: 'Optional sources.json replacement (JSON)'
+        description: Optional sources.json replacement (JSON)
         type: string
         default: ''
-      only:
-        description: Comma-separated candidates
-        type: string
-        default: ducc-python,ducc-cpp,ducc-cpp23,numpy,numpy-pocketfft,scipy,fftw,admiral
       check_only:
-        description: Skip timings
+        description: Correctness only
         type: boolean
         default: false
-      planning:
-        description: Native FFTW and Admiral planning effort
-        type: choice
-        options: [estimate, measure]
-        default: estimate
 
 permissions:
   contents: read
 
 jobs:
+  build:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 240
+    outputs:
+      replicas: ${{ steps.matrix.outputs.replicas }}
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Resolve matrix and source revisions
+        id: matrix
+        env:
+          RUNNERS: ${{ inputs.runners || 1 }}
+          SOURCE_CONFIG: ${{ inputs.config }}
+        run: |
+          python -c 'import json,os; n=int(os.environ["RUNNERS"]); assert 1 <= n <= 40; print("replicas="+json.dumps(list(range(1,n+1))))' >> "$GITHUB_OUTPUT"
+          cp sources.json requested.json
+          if [[ -n "$SOURCE_CONFIG" ]]; then printf '%s\n' "$SOURCE_CONFIG" > requested.json; fi
+          python resolve_sources.py requested.json resolved.json
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 ninja-build libfftw3-dev
+          { python --version; g++-14 --version; dpkg-query -W libfftw3-dev libc6 libstdc++6; cat /etc/os-release; } > toolchain.txt
+      - name: Check workload definitions
+        run: |
+          python -m compileall -q cases.py reference.py bench.py run.py summarize.py plot.py lengths.py resolve_sources.py
+          python -m unittest discover -v
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: bundle
+          key: fft-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('resolved.json', 'toolchain.txt', 'run.py', 'cpp/**') }}
+      - name: Compile candidates
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: python run.py --config resolved.json --build-only bundle --output bundle/logs
+      - name: Package portable builds
+        if: always()
+        run: |
+          if [[ -d bundle ]]; then tar -czf fft-build.tar.gz bundle; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fft-build
+          path: fft-build.tar.gz
+          compression-level: 0
+          if-no-files-found: warn
+
   benchmark:
+    needs: build
     name: FFT runner ${{ matrix.replica }}
     runs-on: ubuntu-26.04
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
-        replica: ${{ fromJSON(inputs.replicas || '[1]') }}
+        replica: ${{ fromJSON(needs.build.outputs.replicas) }}
     env:
       CC: gcc-14
       CXX: g++-14
@@ -57,31 +103,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install native dependencies
+      - name: Install runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-14 g++-14 ninja-build libfftw3-dev
-      - name: Check workload definitions
-        run: |
-          python -m compileall -q cases.py reference.py bench.py run.py summarize.py plot.py
-          python -m unittest discover -v
-      - name: Build and compare candidates
+          sudo apt-get install -y gcc-14 g++-14 libfftw3-dev
+      - uses: actions/download-artifact@v4
+        with:
+          name: fft-build
+      - run: tar -xzf fft-build.tar.gz
+      - name: Test prebuilt candidates
         env:
-          SOURCE_CONFIG: ${{ inputs.config }}
           SUITE: ${{ inputs.suite || 'fast' }}
-          ONLY: ${{ inputs.only || 'ducc-python,ducc-cpp,ducc-cpp23,numpy,numpy-pocketfft,scipy,fftw,admiral' }}
           CHECK_ONLY: ${{ inputs.check_only }}
-          PLANNING: ${{ inputs.planning || 'estimate' }}
         run: |
-          config=sources.json
-          if [[ -n "$SOURCE_CONFIG" ]]; then
-            config="$RUNNER_TEMP/sources.json"
-            printf '%s\n' "$SOURCE_CONFIG" > "$config"
-          fi
           extra=()
           if [[ "$CHECK_ONLY" == "true" ]]; then extra+=(--check-only); fi
-          python run.py --suite "$SUITE" --config "$config" --only "$ONLY" \
-            --planning "$PLANNING" "${extra[@]}"
+          python run.py --from-bundle bundle --suite "$SUITE" "${extra[@]}"
       - name: Summarize results
         if: always()
         run: |
@@ -105,8 +142,8 @@ jobs:
 
   summary:
     name: Cross-runner summary
-    needs: benchmark
-    if: ${{ always() && !cancelled() && fromJSON(inputs.replicas || '[1]')[1] != null }}
+    needs: [build, benchmark]
+    if: ${{ always() && !cancelled() && needs.build.result == 'success' && (inputs.runners || 1) > 1 }}
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4

@@ -14,5 +14,5 @@ Follow [write-like-a-scientist](https://github.com/mwyau/write-like-a-scientist)
 - Plot absolute runtime against transformed length on log-log axes per runner. Use package colors and ISA line styles. Keep batch shape, transform, precision, threads and layout fixed within a panel; do not mix raw runtimes across CPUs.
 - Keep source checkouts and generated builds/results out of Git. Do not modify candidate repositories. Do not push to candidate forks or upstream repositories.
 - Never automatically cancel previous workflow runs. Attach results from each runner and an aggregate report for multiple runners.
-- Use a single runner by default on push. Optional replicated runs should repeat the same comparison on each host rather than distribute competing implementations across hosts.
+- Compile once and distribute portable fixed-ISA wheels and executables; never distribute builder-specific native code to other CPUs. Cache only exact resolved source/toolchain/build inputs. Use a single benchmark runner by default on push. Optional replicated runs should repeat the same comparison on each host rather than distribute competing implementations across hosts.
 

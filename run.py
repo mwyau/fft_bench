@@ -114,9 +114,11 @@ def build_native(kind, src, target, work, log, jobs, *, cxx_standard=17):
         args += [f"-DDUCC_SOURCE={src}", f"-DDUCC_CXX_STANDARD={cxx_standard}"]
     elif kind == "admiral":
         args.append(f"-DADMIRAL_SOURCE={src}")
+        if target == "x86-64":
+            args.append("-DADM_DISPATCH=ON")
     command(["cmake", "-S", ROOT / "cpp", "-B", work, "-G", "Ninja",
              "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", *args], log)
-    command(["cmake", "--build", work, "--parallel", jobs, "--verbose"], log)
+    command(["cmake", "--build", work, "--target", "fft_native", "--parallel", jobs, "--verbose"], log)
     shutil.copyfile(work / "compile_commands.json", log.with_suffix(".compile.json"))
     return work / "fft_native"
 
@@ -132,11 +134,14 @@ def main():
     p.add_argument("--jobs", type=int, default=2)
     p.add_argument("--check-only", action="store_true")
     p.add_argument("--planning", choices=("estimate", "measure"), default="estimate")
+    stage = p.add_mutually_exclusive_group()
+    stage.add_argument("--build-only", type=Path, metavar="BUNDLE")
+    stage.add_argument("--from-bundle", type=Path, metavar="BUNDLE")
     args = p.parse_args()
     selected = set(args.only.split(","))
     if selected - set(KINDS) or args.jobs < 1:
         p.error("invalid --only or --jobs")
-    config = json.loads(args.config.read_text())
+    config = json.loads((args.from_bundle / "sources.json" if args.from_bundle else args.config).read_text())
     names = [s["name"] for k in ("ducc", "numpy", "admiral") for s in config.get(k, [])]
     if len(names) != len(set(names)) or set(names) & {"scipy", "fftw", "reference", PY_REFERENCE, CPP_REFERENCE}:
         p.error("source names must be distinct and not reserved")
@@ -147,6 +152,12 @@ def main():
     args.work.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="run-", dir=args.work.resolve()))
     levels = cpu_levels()
+    build_levels = (1, 2, 3, 4) if args.build_only else levels
+    bundle = args.build_only.resolve() if args.build_only else None
+    manifest = []
+    if bundle:
+        bundle.mkdir(parents=True, exist_ok=True)
+        (bundle / "sources.json").write_text(json.dumps(config, indent=2) + "\n")
     compiler = os.environ.get("CXX", "c++")
     host = dict(usable_levels=sorted(levels), compiler=capture(compiler, "--version"),
                 cpuinfo=Path("/proc/cpuinfo").read_text().split("\n\n")[0],
@@ -165,6 +176,20 @@ def main():
         log = out / (label + ".log")
         meta_path = out / (label + ".build.json")
         meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+        if bundle:
+            folder = bundle / label
+            folder.mkdir()
+            wheel = meta.get("wheel")
+            if wheel:
+                shutil.copy2(Path(py).parent.parent.parent / "wheel" / wheel, folder / wheel)
+            if executable:
+                shutil.copy2(executable, folder / "fft_native")
+            overrides = {key: (env or {}).get(key) for key in
+                         ("DUCC0_MAX_PSABI_LEVEL", "NPY_DISABLE_CPU_FEATURES")}
+            manifest.append(dict(label=label, candidate=candidate, meta=meta,
+                                 wheel=wheel, native=bool(executable), env=overrides))
+            (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            return
         cmd = [py, ROOT / "bench.py", "--candidate", candidate, "--suite", args.suite,
                "--label", label, "--output", out / (label + ".jsonl"),
                "--metadata", meta_path, "--samples", 5 if args.suite == "fast" else 9]
@@ -186,6 +211,34 @@ def main():
             record(label, "fail", str(exc))
 
     base = venv(work / "reference", config, out / "reference.log")
+    if args.from_bundle:
+        source = args.from_bundle.resolve()
+        for entry in json.loads((source / "manifest.json").read_text()):
+            label, meta = entry["label"], entry["meta"]
+            level = meta.get("requested_level")
+            if level and level not in levels:
+                record(label, "skip", "host/OS does not support requested ISA")
+                continue
+
+            def run_cached():
+                py = base
+                folder = source / label
+                if entry["wheel"]:
+                    py = venv(work / label, config, out / (label + ".log"))
+                    command([py, "-m", "pip", "install", "--force-reinstall", "--no-deps",
+                             folder / entry["wheel"]], out / (label + ".log"))
+                env = dict(os.environ)
+                for key, value in entry["env"].items():
+                    env.pop(key, None)
+                    if value is not None:
+                        env[key] = value
+                exe = folder / "fft_native" if entry["native"] else None
+                execute(label, py, entry["candidate"], meta, executable=exe, env=env)
+
+            attempt(label, run_cached)
+        return int(not runs or any(r["status"] == "fail" for r in runs)
+                   or not any(r["status"] == "pass" for r in runs))
+
     # References are mandatory for the selected APIs, even with --only.
     need_python = bool(selected & {"ducc-python", "numpy", "numpy-pocketfft", "scipy"})
     need_cpp = bool(selected & {"ducc-cpp", "ducc-cpp23", "fftw", "admiral"})
@@ -250,12 +303,15 @@ def main():
             except Exception as exc:
                 record(name + "-checkout", "fail", str(exc))
                 continue
-            origin = dict(repo=spec["repo"], ref=spec["ref"], sha=sha, backend=kind)
+            origin = dict(repo=spec["repo"], ref=spec.get("source_ref", spec["ref"]), sha=sha, backend=kind)
             if kind == "admiral":
                 def admiral():
-                    exe = build_native(kind, src, "native", work / (name + "-cpp"),
+                    # Runtime dispatch permits moving the binary between CPU models.
+                    target = "x86-64" if bundle else "native"
+                    exe = build_native(kind, src, target, work / (name + "-cpp"),
                                        out / (name + ".log"), args.jobs)
-                    execute(name, base, "native", dict(origin, architecture="native"), executable=exe)
+                    execute(name, base, "native", dict(origin, architecture="runtime-dispatch" if bundle
+                            else "native"), executable=exe)
                 attempt(name, admiral)
                 continue
             if kind == "numpy" and "numpy-pocketfft" in enabled:
@@ -289,7 +345,7 @@ def main():
             for level in targets:
                 prefix = name + ("-py" if kind == "ducc" else "") + f"-v{level}"
                 if py_selected:
-                    if level not in levels:
+                    if level not in build_levels:
                         record(prefix, "skip", "host/OS does not support requested ISA")
                     elif not dispatch_build or dispatch_py:
                         def python_profile():
@@ -322,7 +378,7 @@ def main():
                             continue
                         suffix = "cpp" if standard == 17 else f"cpp{standard}"
                         label = name + f"-{suffix}-v{level}"
-                        if level not in levels:
+                        if level not in build_levels:
                             record(label, "skip", "host/OS does not support requested ISA")
                             continue
 
