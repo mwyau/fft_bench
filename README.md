@@ -14,6 +14,8 @@ python run.py --suite full --output results/full
 python run.py --only ducc-python,numpy --group batched --output results/batched
 python run.py --only ducc-cpp,ducc-cpp23 --output results/ducc-cpp
 python summarize.py results/fast
+python -m pip install matplotlib
+python plot.py results/fast
 ```
 
 Use `--check-only` to skip timings. Use separate output directories for independent runs.
@@ -25,5 +27,7 @@ Edit `sources.json` or pass `--config path/to/sources.json` to choose repositori
 Pushes to `main` run the fast suite on one runner. Runs do not cancel earlier runs. For manual runs, select fast or full and set the replica array (e.g. `[1,2,3,4]`). Each runner builds and tests all selected candidates independently. AVX-512 availability depends on the assigned runner.
 
 Each runner attaches raw results, build logs, metadata, `normalized.csv`, `grouped.csv` and `summary.md`. Multiple runners also produce an `fft-summary` artifact and a combined Actions summary. Tables show test groups by candidate and ISA, per CPU model and across runners. The fixed DUCC 0.42.0 v1 reference is built for each selected API. Ratios are candidate/reference time (1.000 = reference; lower is faster), computed on matched passing cases within each runner, then geometric-averaged with equal runner weight. Cells show matched case and runner counts. Python allocation and explicit buffers are separate; FFTW and Admiral reusable-plan execution excludes plan creation. Missing or unsupported results are not imputed. Cells marked † include individually passing cases from a failed candidate or reference run; inspect the correctness counts before interpreting them.
+
+The `plots/` directory in each artifact contains absolute median runtime (µs/call) versus FFT length for every timed group, with separate Python and C++ panels. Colors identify packages, line styles identify ISA levels, and panels hold workload attributes fixed. Multidimensional length is the product of transformed dimensions. Cross-runner artifacts retain plots per runner; absolute runtimes are not pooled across hosts. `plots/points.csv` records exact plotted cases.
 
 The first version targets Linux x86-64. See [AGENTS.md](AGENTS.md) for development conventions.
