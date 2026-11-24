@@ -1,0 +1,262 @@
+"""Build pinned candidates and compare them on one Linux x86-64 host."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parent
+KINDS = ("ducc-python", "ducc-cpp", "numpy", "scipy", "fftw", "admiral")
+
+
+def command(args, log, *, env=None, cwd=None):
+    args = [str(a) for a in args]
+    print(shlex.join(args), flush=True)
+    with log.open("a") as stream:
+        stream.write("\n$ " + shlex.join(args) + "\n")
+        stream.flush()
+        subprocess.run(args, cwd=cwd, env=env, stdout=stream, stderr=subprocess.STDOUT,
+                       check=True, timeout=3600)
+
+
+def capture(*args):
+    return subprocess.check_output(args, text=True).strip()
+
+
+def cpu_levels():
+    if platform.machine() != "x86_64":
+        raise RuntimeError("fixed x86-64 profiles require a Linux x86-64 host")
+    # glibc's hwcaps probe includes OS support for the extended register state.
+    text = capture("/lib64/ld-linux-x86-64.so.2", "--help")
+    return [1] + [int(n) for n in re.findall(r"x86-64-v([234]) \(supported", text)]
+
+
+def arch(level):
+    return "x86-64" if level == 1 else f"x86-64-v{level}"
+
+
+def checkout(spec, dest, log):
+    dest.mkdir()
+    command(["git", "init", dest], log)
+    command(["git", "-C", dest, "remote", "add", "origin", spec["repo"]], log)
+    command(["git", "-C", dest, "fetch", "--depth=1", "origin", spec["ref"]], log)
+    command(["git", "-C", dest, "checkout", "--detach", "FETCH_HEAD"], log)
+    command(["git", "-C", dest, "submodule", "update", "--init", "--recursive", "--depth=1"], log)
+    return capture("git", "-C", str(dest), "rev-parse", "HEAD")
+
+
+def venv(path, config, log):
+    command([sys.executable, "-m", "venv", path], log)
+    py = path / "bin/python"
+    command([py, "-m", "pip", "install", config["reference_numpy"], config["scipy"]], log)
+    return py
+
+
+def build_python(kind, spec, src, level, work, config, log, jobs):
+    py = venv(work / "venv", config, log)
+    wheel_dir = work / "wheel"
+    wheel_dir.mkdir()
+    env = dict(os.environ, CMAKE_BUILD_PARALLEL_LEVEL=str(jobs))
+    env.pop("DUCC0_MAX_PSABI_LEVEL", None)
+    env.pop("NPY_DISABLE_CPU_FEATURES", None)
+    env.pop("DUCC0_USE_NANOBIND", None)
+    env.pop("DUCC0_CFLAGS", None)
+    env.pop("DUCC0_FLAGS", None)
+    env.pop("DUCC0_LFLAGS", None)
+    args = []
+    if kind == "ducc":
+        env["DUCC0_OPTIMIZATION"] = "multiarch-strip" if spec.get("dispatch") else "native-strip"
+        env.pop("CFLAGS", None)
+        env.pop("CXXFLAGS", None)
+        args = [f"-Ccmake.define.DUCC0_ARCH_FLAGS=-march={arch(level)}",
+                "-Ccmake.define.CMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                f"-Cbuild-dir={work / 'build'}"]
+    else:
+        env.update(CFLAGS=f"-march={arch(level)}", CXXFLAGS=f"-march={arch(level)}")
+        dispatch = "max" if spec.get("dispatch") else "none"
+        args = [f"-Csetup-args=-Dcpu-baseline=X86_V{level}",
+                f"-Csetup-args=-Dcpu-dispatch={dispatch}",
+                "-Csetup-args=-Dallow-noblas=true", f"-Ccompile-args=-j{jobs}",
+                f"-Cbuild-dir={work / 'build'}"]
+    command([py, "-m", "pip", "wheel", "-v", "--no-cache-dir", "--no-deps",
+             "-w", wheel_dir, *args, src], log, env=env)
+    wheels = list(wheel_dir.glob("*.whl"))
+    if len(wheels) != 1:
+        raise RuntimeError("expected one source-built wheel")
+    command([py, "-m", "pip", "install", "--force-reinstall", "--no-deps", wheels[0]], log)
+    return py, wheels[0].name
+
+
+def build_native(kind, src, target, work, log, jobs):
+    args = [f"-DBENCH_BACKEND={kind}", f"-DBENCH_ARCH={target}"]
+    if kind == "ducc":
+        args.append(f"-DDUCC_SOURCE={src}")
+    elif kind == "admiral":
+        args.append(f"-DADMIRAL_SOURCE={src}")
+    command(["cmake", "-S", ROOT / "cpp", "-B", work, "-G", "Ninja",
+             "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", *args], log)
+    command(["cmake", "--build", work, "--parallel", jobs, "--verbose"], log)
+    return work / "fft_native"
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--suite", choices=("fast", "full"), default="fast")
+    p.add_argument("--config", type=Path, default=ROOT / "sources.json")
+    p.add_argument("--only", default=",".join(KINDS), help="comma-separated candidate kinds")
+    p.add_argument("--group", action="append")
+    p.add_argument("--output", type=Path, default=ROOT / "results")
+    p.add_argument("--work", type=Path, default=ROOT / "work")
+    p.add_argument("--jobs", type=int, default=2)
+    p.add_argument("--check-only", action="store_true")
+    p.add_argument("--planning", choices=("estimate", "measure"), default="estimate")
+    args = p.parse_args()
+    selected = set(args.only.split(","))
+    if selected - set(KINDS) or args.jobs < 1:
+        p.error("invalid --only or --jobs")
+    config = json.loads(args.config.read_text())
+    out = args.output.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    args.work.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="run-", dir=args.work.resolve()))
+    levels = cpu_levels()
+    compiler = os.environ.get("CXX", "c++")
+    host = dict(usable_levels=sorted(levels), compiler=capture(compiler, "--version"),
+                cpuinfo=Path("/proc/cpuinfo").read_text().split("\n\n")[0],
+                kernel=platform.platform(), runner=os.environ.get("RUNNER_NAME", "local"))
+    (out / "host.json").write_text(json.dumps(host, indent=2) + "\n")
+    (out / "sources.json").write_text(json.dumps(config, indent=2) + "\n")
+    runs = []
+
+    def record(label, status, reason=""):
+        runs.append(dict(label=label, status=status, reason=reason))
+        (out / "runs.json").write_text(json.dumps(runs, indent=2) + "\n")
+        print(label, status, reason, flush=True)
+
+    def execute(label, py, candidate, meta, *, executable=None, env=None):
+        log = out / (label + ".log")
+        meta_path = out / (label + ".build.json")
+        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+        cmd = [py, ROOT / "bench.py", "--candidate", candidate, "--suite", args.suite,
+               "--label", label, "--output", out / (label + ".jsonl"),
+               "--metadata", meta_path, "--samples", 5 if args.suite == "fast" else 9]
+        if args.check_only:
+            cmd.append("--check-only")
+        for group in args.group or []:
+            cmd += ["--group", group]
+        if executable:
+            cmd += ["--executable", executable, "--planning",
+                    "estimate" if candidate == "native" and meta.get("backend") == "ducc"
+                    else args.planning]
+        command(cmd, log, env=env, cwd=work)
+
+    def attempt(label, fn):
+        try:
+            fn()
+            record(label, "pass")
+        except Exception as exc:
+            record(label, "fail", str(exc))
+
+    base = venv(work / "reference", config, out / "reference.log")
+    if "scipy" in selected:
+        attempt("scipy", lambda: execute("scipy", base, "scipy",
+                                        dict(backend="scipy", package=config["scipy"])))
+
+    if "fftw" in selected:
+        def fftw():
+            exe = build_native("fftw", None, "x86-64", work / "fftw", out / "fftw.log", args.jobs)
+            version = capture("dpkg-query", "-W", "libfftw3-dev")
+            execute("fftw", base, "native", dict(backend="fftw", package=version,
+                    architecture="system-library"), executable=exe)
+        attempt("fftw", fftw)
+
+    for kind in ("ducc", "numpy", "admiral"):
+        relevant = {"ducc": {"ducc-python", "ducc-cpp"}, "numpy": {"numpy"},
+                    "admiral": {"admiral"}}[kind]
+        if not relevant & selected:
+            continue
+        for spec in config.get(kind, []):
+            name = spec["name"]
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+                raise ValueError("source name must contain only letters, numbers, _ or -")
+            src = work / (kind + "-" + name)
+            try:
+                sha = checkout(spec, src, out / (name + "-checkout.log"))
+            except Exception as exc:
+                record(name + "-checkout", "fail", str(exc))
+                continue
+            origin = dict(repo=spec["repo"], ref=spec["ref"], sha=sha, backend=kind)
+            if kind == "admiral":
+                def admiral():
+                    exe = build_native(kind, src, "native", work / (name + "-cpp"),
+                                       out / (name + ".log"), args.jobs)
+                    execute(name, base, "native", dict(origin, architecture="native"), executable=exe)
+                attempt(name, admiral)
+                continue
+            targets = (1, 3, 4) if kind == "ducc" else (2, 3, 4)
+            py_selected = "ducc-python" in selected if kind == "ducc" else "numpy" in selected
+            dispatch_build = spec.get("dispatch", False)
+            dispatch_py = None
+            dispatch_wheel = None
+            if py_selected and dispatch_build:
+                label = name + "-dispatch-build"
+                try:
+                    folder = work / label
+                    folder.mkdir()
+                    dispatch_py, dispatch_wheel = build_python(kind, spec, src, targets[0], folder,
+                        config, out / (label + ".log"), args.jobs)
+                except Exception as exc:
+                    record(label, "fail", str(exc))
+            for level in targets:
+                prefix = name + ("-py" if kind == "ducc" else "") + f"-v{level}"
+                if py_selected:
+                    if level not in levels:
+                        record(prefix, "skip", "host/OS does not support requested ISA")
+                    elif not dispatch_build or dispatch_py:
+                        def python_profile():
+                            label = prefix
+                            log = out / (label + ".log")
+                            if dispatch_build:
+                                py, wheel = dispatch_py, dispatch_wheel
+                            else:
+                                folder = work / label
+                                folder.mkdir()
+                                py, wheel = build_python(kind, spec, src, level, folder, config, log, args.jobs)
+                            meta = dict(origin, architecture=arch(level), requested_level=level,
+                                        build_mode="dispatch" if dispatch_build else "fixed", wheel=wheel)
+                            env = dict(os.environ)
+                            env.pop("DUCC0_MAX_PSABI_LEVEL", None)
+                            env.pop("NPY_DISABLE_CPU_FEATURES", None)
+                            if dispatch_build:
+                                if kind == "ducc":
+                                    env["DUCC0_MAX_PSABI_LEVEL"] = str(level)
+                                else:
+                                    env["NPY_DISABLE_CPU_FEATURES"] = ",".join(
+                                        f"X86_V{v}" for v in targets if v > level)
+                            execute(label, py, "ducc0" if kind == "ducc" else "numpy", meta, env=env)
+                        attempt(prefix, python_profile)
+                if kind == "ducc" and "ducc-cpp" in selected:
+                    label = name + f"-cpp-v{level}"
+                    if level not in levels:
+                        record(label, "skip", "host/OS does not support requested ISA")
+                    else:
+                        def ducc_cpp():
+                            exe = build_native(kind, src, arch(level), work / label,
+                                               out / (label + ".log"), args.jobs)
+                            execute(label, base, "native", dict(origin, architecture=arch(level),
+                                    requested_level=level, build_mode="fixed"), executable=exe)
+                        attempt(label, ducc_cpp)
+
+    return int(not runs or any(r["status"] == "fail" for r in runs)
+               or not any(r["status"] == "pass" for r in runs))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
