@@ -18,8 +18,8 @@ DUCC_CPP_STANDARDS = {"ducc-cpp": 17, "ducc-cpp23": 23}
 # ducc0_0_42_0, pinned independently of the candidate configuration.
 REFERENCE = dict(name="ducc-0-42", repo="https://github.com/mreineck/ducc.git",
                  ref="42ce8ab5c5d79e0e2fd9af4a09c2ea4693520e1b")
-PY_REFERENCE = "ducc-0-42-v1"
-CPP_REFERENCE = "ducc-0-42-cpp-v1"
+PY_REFERENCE = "ducc-0-42"
+CPP_REFERENCE = "ducc-0-42-cpp"
 
 
 def command(args, log, *, env=None, cwd=None):
@@ -138,7 +138,7 @@ def main():
         p.error("invalid --only or --jobs")
     config = json.loads(args.config.read_text())
     names = [s["name"] for k in ("ducc", "numpy", "admiral") for s in config.get(k, [])]
-    if len(names) != len(set(names)) or set(names) & {"scipy", "fftw", "reference", REFERENCE["name"]}:
+    if len(names) != len(set(names)) or set(names) & {"scipy", "fftw", "reference", PY_REFERENCE, CPP_REFERENCE}:
         p.error("source names must be distinct and not reserved")
     out = args.output.resolve()
     if out.exists() and any(out.iterdir()):
@@ -189,7 +189,7 @@ def main():
     # References are mandatory for the selected APIs, even with --only.
     need_python = bool(selected & {"ducc-python", "numpy", "numpy-pocketfft", "scipy"})
     need_cpp = bool(selected & {"ducc-cpp", "ducc-cpp23", "fftw", "admiral"})
-    ref_src = work / "ducc-0-42"
+    ref_src = work / "ducc-0-42-source"
     ref_sha = None
     if need_python or need_cpp:
         try:
