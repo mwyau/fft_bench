@@ -10,7 +10,7 @@
     {
       "name": "ducc-simd",
       "repo": "https://github.com/mwyau/ducc.git",
-      "ref": "f80b987891bd34d367c414dc2f27a13e42f4cb94",
+      "ref": "96d5f45ac73bdc658fb31b9ec32902a3254e3dad",
       "source_ref": "fft-simd-improvements"
     },
     {
@@ -26,7 +26,7 @@
     {
       "name": "numpy",
       "repo": "https://github.com/mwyau/numpy.git",
-      "ref": "b7053b3dc6cd0631b6a1d4445750cd5423eb09b5",
+      "ref": "e056ee12b653bb690a27b52069bbcfc74a3cfc55",
       "fft_backend": "duccfft",
       "source_ref": "enh/duccfft-simd-improvements",
       "dispatch": true
